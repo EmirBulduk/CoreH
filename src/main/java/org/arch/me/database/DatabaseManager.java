@@ -17,6 +17,7 @@ public class DatabaseManager {
     private final EnhancedCoreH plugin;
     private HikariDataSource dataSource;
     private String tablePrefix;
+    private String databaseType;
 
     public DatabaseManager(EnhancedCoreH plugin) {
      this.plugin = plugin;
@@ -28,6 +29,9 @@ public class DatabaseManager {
 
         try {
             setupDataSource(config);
+            try (Connection connection = getConnection()) {
+                this.databaseType = connection.getMetaData().getDatabaseProductName();
+            }
             createTables();
             return true;
         } catch (Exception e) {
@@ -242,6 +246,20 @@ public class DatabaseManager {
         }
     }
 
+    public void closeConnection() {
+        if (dataSource != null && !dataSource.isClosed()) {
+            dataSource.close();
+        }
+    }
+
+    public String getTablePrefix() {
+        return tablePrefix;
+    }
+
+    public boolean isSQLServer() {
+        return "Microsoft SQL Server".equalsIgnoreCase(databaseType);
+    }
+
     public Connection getConnection() throws SQLException {
         return dataSource.getConnection();
     }
@@ -366,15 +384,6 @@ public class DatabaseManager {
         }
     }
 
-    public String getTablePrefix() {
-        return tablePrefix;
-    }
-
-    public void closeConnection() {
-        if (dataSource != null) {
-            dataSource.close();
-        }
-    }
 
     @FunctionalInterface
     public interface ResultSetMapper<T> {

@@ -2,8 +2,7 @@ name: EnhancedCoreH
 version: ${version}
 main: org.arch.me.EnhancedCoreH
 api-version: '1.21'
-loaders:
-  - paper
+load: POSTWORLD
 dependencies:
   - name: Vault
     load: BEFORE
@@ -11,19 +10,3 @@ dependencies:
   - name: Essentials
     load: BEFORE
     required: false
-commands:
-  town:
-    description: Town management commands
-    usage: /<command> [subcommand]
-  nation:
-    description: Nation management commands
-    usage: /<command> [subcommand]
-  plot:
-    description: Plot management commands
-    usage: /<command> [subcommand]
-  resident:
-    description: Resident management commands
-    usage: /<command> [subcommand]
-  towny:
-    description: Admin commands for Towny
-    usage: /<command> [subcommand]
