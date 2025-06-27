@@ -58,12 +58,51 @@ public class EconomyManager {
         }
     }
 
+    // Add overloaded method for Player objects
+    public double getBalance(org.bukkit.entity.Player player) {
+        return getPlayerBalance(player.getUniqueId()).doubleValue();
+    }
+
+    public boolean hasBalance(org.bukkit.entity.Player player, double amount) {
+        if (useVault) {
+            return vaultEconomy.has(player, amount);
+        }
+        return getPlayerBalance(player.getUniqueId()).compareTo(BigDecimal.valueOf(amount)) >= 0;
+    }
+
     public boolean hasPlayerBalance(UUID playerId, BigDecimal amount) {
         if (useVault) {
             OfflinePlayer player = plugin.getServer().getOfflinePlayer(playerId);
             return vaultEconomy.has(player, amount.doubleValue());
         }
         return getPlayerBalance(playerId).compareTo(amount) >= 0;
+    }
+
+    // Add overloaded methods for Player objects
+    public CustomEconomyResponse withdrawPlayer(org.bukkit.entity.Player player, double amount) {
+        if (useVault) {
+            EconomyResponse response = vaultEconomy.withdrawPlayer(player, amount);
+            return new CustomEconomyResponse(
+                    BigDecimal.valueOf(response.amount),
+                    BigDecimal.valueOf(response.balance),
+                    response.transactionSuccess() ? CustomEconomyResponse.ResponseType.SUCCESS : CustomEconomyResponse.ResponseType.FAILURE,
+                    response.errorMessage
+            );
+        }
+        return withdrawPlayer(player.getUniqueId(), BigDecimal.valueOf(amount));
+    }
+
+    public CustomEconomyResponse depositPlayer(org.bukkit.entity.Player player, double amount) {
+        if (useVault) {
+            EconomyResponse response = vaultEconomy.depositPlayer(player, amount);
+            return new CustomEconomyResponse(
+                    BigDecimal.valueOf(response.amount),
+                    BigDecimal.valueOf(response.balance),
+                    response.transactionSuccess() ? CustomEconomyResponse.ResponseType.SUCCESS : CustomEconomyResponse.ResponseType.FAILURE,
+                    response.errorMessage
+            );
+        }
+        return depositPlayer(player.getUniqueId(), BigDecimal.valueOf(amount));
     }
 
     public CustomEconomyResponse withdrawPlayer(UUID playerId, BigDecimal amount) {

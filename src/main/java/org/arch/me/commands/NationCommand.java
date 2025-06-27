@@ -108,11 +108,20 @@ public class NationCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
-        // Check economy requirements
+        // Check economy requirements using Vault API directly
         BigDecimal cost = BigDecimal.valueOf(plugin.getConfigManager().getEconomyValue("nation-creation-cost"));
-        if (!plugin.getEconomyManager().hasTownBalance(playerTown.getUuid(), cost)) {
-            player.sendMessage("§cYour town doesn't have enough funds! Required: " +
-                    plugin.getEconomyManager().format(cost));
+
+        // Use Vault API directly for money check and withdrawal
+        if (!plugin.getEconomyManager().hasBalance(player, cost.doubleValue())) {
+            player.sendMessage("§cYou don't have enough money! Required: " +
+                    plugin.getEconomyManager().format(cost) +
+                    " | You have: " + plugin.getEconomyManager().format(BigDecimal.valueOf(plugin.getEconomyManager().getBalance(player))));
+            return;
+        }
+
+        // Withdraw money first
+        if (!plugin.getEconomyManager().withdrawPlayer(player, cost.doubleValue()).transactionSuccess()) {
+            player.sendMessage("§cFailed to withdraw money for nation creation!");
             return;
         }
 
@@ -121,8 +130,11 @@ public class NationCommand implements CommandExecutor, TabCompleter {
                 .thenAccept(nation -> {
                     if (nation != null) {
                         player.sendMessage(plugin.getConfigManager().getMessage("nation.created", nationName));
+                        player.sendMessage("§aDeducted " + plugin.getEconomyManager().format(cost) + " for nation creation.");
                     } else {
-                        player.sendMessage("§cFailed to create nation. Name might already exist.");
+                        // Refund money if nation creation failed
+                        plugin.getEconomyManager().depositPlayer(player, cost.doubleValue());
+                        player.sendMessage("§cFailed to create nation. Name might already exist. Money has been refunded.");
                     }
                 });
     }

@@ -331,19 +331,53 @@ public class TownManager {
         try {
             DatabaseManager db = plugin.getDatabaseManager();
 
-            String sql = """
-                INSERT INTO %stowns (uuid, name, mayor_uuid, nation_uuid, spawn_world, spawn_x, spawn_y, spawn_z, 
-                spawn_yaw, spawn_pitch, founded, balance, tax_rate, upkeep_cost, max_residents, is_open, is_public, 
-                board, permissions, flags, metadata) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE
-                name = VALUES(name), mayor_uuid = VALUES(mayor_uuid), nation_uuid = VALUES(nation_uuid),
-                spawn_world = VALUES(spawn_world), spawn_x = VALUES(spawn_x), spawn_y = VALUES(spawn_y),
-                spawn_z = VALUES(spawn_z), spawn_yaw = VALUES(spawn_yaw), spawn_pitch = VALUES(spawn_pitch),
-                balance = VALUES(balance), tax_rate = VALUES(tax_rate), upkeep_cost = VALUES(upkeep_cost),
-                max_residents = VALUES(max_residents), is_open = VALUES(is_open), is_public = VALUES(is_public),
-                board = VALUES(board), permissions = VALUES(permissions), flags = VALUES(flags), metadata = VALUES(metadata)
-                """.formatted(db.getTablePrefix());
+            String sql;
+            if (db.isSQLServer()) {
+                sql = """
+                    MERGE INTO %stowns AS target
+                    USING (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)) AS source 
+                    (uuid, name, mayor_uuid, nation_uuid, spawn_world, spawn_x, spawn_y, spawn_z, spawn_yaw, spawn_pitch, founded, balance, tax_rate, upkeep_cost, max_residents, is_open, is_public, board, permissions, flags, metadata)
+                    ON target.uuid = source.uuid
+                    WHEN MATCHED THEN
+                        UPDATE SET
+                            name = source.name,
+                            mayor_uuid = source.mayor_uuid,
+                            nation_uuid = source.nation_uuid,
+                            spawn_world = source.spawn_world,
+                            spawn_x = source.spawn_x,
+                            spawn_y = source.spawn_y,
+                            spawn_z = source.spawn_z,
+                            spawn_yaw = source.spawn_yaw,
+                            spawn_pitch = source.spawn_pitch,
+                            balance = source.balance,
+                            tax_rate = source.tax_rate,
+                            upkeep_cost = source.upkeep_cost,
+                            max_residents = source.max_residents,
+                            is_open = source.is_open,
+                            is_public = source.is_public,
+                            board = source.board,
+                            permissions = source.permissions,
+                            flags = source.flags,
+                            metadata = source.metadata
+                    WHEN NOT MATCHED THEN
+                        INSERT (uuid, name, mayor_uuid, nation_uuid, spawn_world, spawn_x, spawn_y, spawn_z, spawn_yaw, spawn_pitch, founded, balance, tax_rate, upkeep_cost, max_residents, is_open, is_public, board, permissions, flags, metadata)
+                        VALUES (source.uuid, source.name, source.mayor_uuid, source.nation_uuid, source.spawn_world, source.spawn_x, source.spawn_y, source.spawn_z, source.spawn_yaw, source.spawn_pitch, source.founded, source.balance, source.tax_rate, source.upkeep_cost, source.max_residents, source.is_open, source.is_public, source.board, source.permissions, source.flags, source.metadata);
+                    """.formatted(db.getTablePrefix());
+            } else {
+                sql = """
+                    INSERT INTO %stowns (uuid, name, mayor_uuid, nation_uuid, spawn_world, spawn_x, spawn_y, spawn_z, 
+                    spawn_yaw, spawn_pitch, founded, balance, tax_rate, upkeep_cost, max_residents, is_open, is_public, 
+                    board, permissions, flags, metadata) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON DUPLICATE KEY UPDATE
+                    name = VALUES(name), mayor_uuid = VALUES(mayor_uuid), nation_uuid = VALUES(nation_uuid),
+                    spawn_world = VALUES(spawn_world), spawn_x = VALUES(spawn_x), spawn_y = VALUES(spawn_y),
+                    spawn_z = VALUES(spawn_z), spawn_yaw = VALUES(spawn_yaw), spawn_pitch = VALUES(spawn_pitch),
+                    balance = VALUES(balance), tax_rate = VALUES(tax_rate), upkeep_cost = VALUES(upkeep_cost),
+                    max_residents = VALUES(max_residents), is_open = VALUES(is_open), is_public = VALUES(is_public),
+                    board = VALUES(board), permissions = VALUES(permissions), flags = VALUES(flags), metadata = VALUES(metadata)
+                    """.formatted(db.getTablePrefix());
+            }
 
             Location spawn = town.getSpawn();
             db.executeUpdate(sql,
@@ -469,3 +503,4 @@ public class TownManager {
         return townCache.size();
     }
 }
+

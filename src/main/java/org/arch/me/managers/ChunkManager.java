@@ -109,49 +109,66 @@ public class ChunkManager {
 
                 // Check if world allows claiming
                 if (!plugin.getConfigManager().getEnabledWorlds().contains(world)) {
+                    plugin.getLogger().info("Chunk claim failed: World " + world + " not enabled for claiming");
                     return false;
                 }
 
                 if (plugin.getConfigManager().getDisabledClaimingWorlds().contains(world)) {
+                    plugin.getLogger().info("Chunk claim failed: World " + world + " disabled for claiming");
                     return false;
                 }
 
                 // Check if chunk is already claimed
                 if (isChunkClaimed(world, chunkX, chunkZ)) {
+                    plugin.getLogger().info("Chunk claim failed: Chunk already claimed at " + world + ":" + chunkX + ":" + chunkZ);
                     return false;
                 }
 
                 Town town = plugin.getTownManager().getTown(townUuid);
                 if (town == null) {
+                    plugin.getLogger().info("Chunk claim failed: Town not found with UUID " + townUuid);
                     return false;
                 }
 
                 // Check claiming permissions
                 if (!town.isMayor(claimerUuid) && !hasClaimPermission(townUuid, claimerUuid)) {
+                    plugin.getLogger().info("Chunk claim failed: Player " + claimerUuid + " lacks claim permission");
                     return false;
                 }
 
                 // Check economy requirements
                 BigDecimal cost = BigDecimal.valueOf(plugin.getConfigManager().getEconomyValue("chunk-claim-cost"));
+                BigDecimal townBalance = plugin.getEconomyManager().getTownBalance(townUuid);
+
+                plugin.getLogger().info("Chunk claim check: Cost=" + cost + ", Town balance=" + townBalance);
+
                 if (!plugin.getEconomyManager().hasTownBalance(townUuid, cost)) {
+                    plugin.getLogger().info("Chunk claim failed: Insufficient town funds. Required: " + cost + ", Available: " + townBalance);
                     return false;
                 }
 
                 // Check if chunks need to be connected
                 if (plugin.getConfigManager().getTownValue("require-chunks-connected") == 1) {
-                    if (!isChunkConnectedToTown(townUuid, world, chunkX, chunkZ)) {
+                    if (town.getClaimedChunkCount() > 0 && !isChunkConnectedToTown(townUuid, world, chunkX, chunkZ)) {
+                        plugin.getLogger().info("Chunk claim failed: Chunk not connected to existing town chunks");
                         return false;
                     }
                 }
 
                 // Check max chunks limit
                 int maxChunks = plugin.getConfigManager().getTownValue("max-chunks");
-                if (town.getClaimedChunkCount() >= maxChunks) {
+                int currentChunks = town.getClaimedChunkCount();
+
+                plugin.getLogger().info("Chunk limit check: Current=" + currentChunks + ", Max=" + maxChunks);
+
+                if (currentChunks >= maxChunks) {
+                    plugin.getLogger().info("Chunk claim failed: Town reached max chunk limit (" + maxChunks + ")");
                     return false;
                 }
 
                 // Withdraw money from town
                 if (!plugin.getEconomyManager().withdrawTown(townUuid, cost)) {
+                    plugin.getLogger().info("Chunk claim failed: Failed to withdraw money from town");
                     return false;
                 }
 
@@ -166,7 +183,7 @@ public class ChunkManager {
                 claimedChunks.put(key, chunk);
                 town.addClaimedChunk(chunk);
 
-                plugin.getLogger().info("Chunk claimed at " + world + ":" + chunkX + ":" + chunkZ + " for town " + town.getName());
+                plugin.getLogger().info("Chunk successfully claimed at " + world + ":" + chunkX + ":" + chunkZ + " for town " + town.getName());
                 return true;
 
             } catch (Exception e) {
@@ -433,14 +450,35 @@ public class ChunkManager {
         try {
             DatabaseManager db = plugin.getDatabaseManager();
 
-            String sql = """
-                INSERT INTO %schunks (world, x, z, town_uuid, plot_type, plot_price, owner_uuid, 
-                claimed_date, permissions, flags, metadata) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE
-                plot_type = VALUES(plot_type), plot_price = VALUES(plot_price), owner_uuid = VALUES(owner_uuid),
-                permissions = VALUES(permissions), flags = VALUES(flags), metadata = VALUES(metadata)
-                """.formatted(db.getTablePrefix());
+            String sql;
+            if (db.isSQLServer()) {
+                sql = """
+                    MERGE INTO %schunks AS target
+                    USING (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)) AS source 
+                    (world, x, z, town_uuid, plot_type, plot_price, owner_uuid, claimed_date, permissions, flags, metadata)
+                    ON target.world = source.world AND target.x = source.x AND target.z = source.z
+                    WHEN MATCHED THEN
+                        UPDATE SET
+                            plot_type = source.plot_type,
+                            plot_price = source.plot_price,
+                            owner_uuid = source.owner_uuid,
+                            permissions = source.permissions,
+                            flags = source.flags,
+                            metadata = source.metadata
+                    WHEN NOT MATCHED THEN
+                        INSERT (world, x, z, town_uuid, plot_type, plot_price, owner_uuid, claimed_date, permissions, flags, metadata)
+                        VALUES (source.world, source.x, source.z, source.town_uuid, source.plot_type, source.plot_price, source.owner_uuid, source.claimed_date, source.permissions, source.flags, source.metadata);
+                    """.formatted(db.getTablePrefix());
+            } else {
+                sql = """
+                    INSERT INTO %schunks (world, x, z, town_uuid, plot_type, plot_price, owner_uuid, 
+                    claimed_date, permissions, flags, metadata) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON DUPLICATE KEY UPDATE
+                    plot_type = VALUES(plot_type), plot_price = VALUES(plot_price), owner_uuid = VALUES(owner_uuid),
+                    permissions = VALUES(permissions), flags = VALUES(flags), metadata = VALUES(metadata)
+                    """.formatted(db.getTablePrefix());
+            }
 
             db.executeUpdate(sql,
                     chunk.getWorld(),
@@ -532,3 +570,4 @@ public class ChunkManager {
                 .count();
     }
 }
+

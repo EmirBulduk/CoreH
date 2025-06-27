@@ -387,16 +387,43 @@ public class NationManager {
         try {
             DatabaseManager db = plugin.getDatabaseManager();
 
-            String sql = """
-                INSERT INTO %snations (uuid, name, king_uuid, capital_uuid, founded, balance, tax_rate, 
-                max_towns, is_open, is_public, board, permissions, flags, metadata) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE
-                name = VALUES(name), king_uuid = VALUES(king_uuid), capital_uuid = VALUES(capital_uuid),
-                balance = VALUES(balance), tax_rate = VALUES(tax_rate), max_towns = VALUES(max_towns),
-                is_open = VALUES(is_open), is_public = VALUES(is_public), board = VALUES(board),
-                permissions = VALUES(permissions), flags = VALUES(flags), metadata = VALUES(metadata)
-                """.formatted(db.getTablePrefix());
+            String sql;
+            if (db.isSQLServer()) {
+                sql = """
+                    MERGE INTO %snations AS target
+                    USING (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)) AS source 
+                    (uuid, name, king_uuid, capital_uuid, founded, balance, tax_rate, max_towns, is_open, is_public, board, permissions, flags, metadata)
+                    ON target.uuid = source.uuid
+                    WHEN MATCHED THEN
+                        UPDATE SET
+                            name = source.name,
+                            king_uuid = source.king_uuid,
+                            capital_uuid = source.capital_uuid,
+                            balance = source.balance,
+                            tax_rate = source.tax_rate,
+                            max_towns = source.max_towns,
+                            is_open = source.is_open,
+                            is_public = source.is_public,
+                            board = source.board,
+                            permissions = source.permissions,
+                            flags = source.flags,
+                            metadata = source.metadata
+                    WHEN NOT MATCHED THEN
+                        INSERT (uuid, name, king_uuid, capital_uuid, founded, balance, tax_rate, max_towns, is_open, is_public, board, permissions, flags, metadata)
+                        VALUES (source.uuid, source.name, source.king_uuid, source.capital_uuid, source.founded, source.balance, source.tax_rate, source.max_towns, source.is_open, source.is_public, source.board, source.permissions, source.flags, source.metadata);
+                    """.formatted(db.getTablePrefix());
+            } else {
+                sql = """
+                    INSERT INTO %snations (uuid, name, king_uuid, capital_uuid, founded, balance, tax_rate, 
+                    max_towns, is_open, is_public, board, permissions, flags, metadata) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON DUPLICATE KEY UPDATE
+                    name = VALUES(name), king_uuid = VALUES(king_uuid), capital_uuid = VALUES(capital_uuid),
+                    balance = VALUES(balance), tax_rate = VALUES(tax_rate), max_towns = VALUES(max_towns),
+                    is_open = VALUES(is_open), is_public = VALUES(is_public), board = VALUES(board),
+                    permissions = VALUES(permissions), flags = VALUES(flags), metadata = VALUES(metadata)
+                    """.formatted(db.getTablePrefix());
+            }
 
             db.executeUpdate(sql,
                     nation.getUuid().toString(),
@@ -487,3 +514,4 @@ public class NationManager {
         return nationCache.size();
     }
 }
+
