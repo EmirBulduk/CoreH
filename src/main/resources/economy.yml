@@ -1,0 +1,56 @@
+# economy.yml
+# Economy and pricing configuration
+
+# Currency settings
+currency:
+  symbol: "$"
+  decimal-places: 2
+  thousands-separator: ","
+
+# Creation costs
+costs:
+  town-creation: 1000.0
+  nation-creation: 5000.0
+  chunk-claim: 50.0
+  plot-claim: 25.0
+
+# Daily upkeep costs
+upkeep:
+  town:
+    base-cost: 10.0
+    per-resident: 1.0
+    per-chunk: 0.5
+    max-cost: 500.0
+
+  nation:
+    base-cost: 100.0
+    per-town: 5.0
+    per-member: 0.5
+    max-cost: 2000.0
+
+# Tax settings
+taxes:
+  minimum-town-tax: 1.0
+  minimum-nation-tax: 0.5
+  maximum-tax-rate: 25.0
+  tax-collection-interval: 24 # hours
+
+# Economy features
+features:
+  starting-money: 100.0
+  bank-interest: 0.0
+  inflation-rate: 0.0
+
+# Debt and punishment
+debt:
+  max-debt-days: 7
+  removal-on-debt: true
+  town-disband-days: 3
+  nation-disband-days: 5
+
+# Plot economy
+plots:
+  default-price: 100.0
+  price-per-chunk: 50.0
+  max-plot-price: 10000.0
+  commission-rate: 0.05 # 5% commission on plot sales

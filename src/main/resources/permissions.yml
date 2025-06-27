@@ -1,0 +1,68 @@
+# permissions.yml
+# Permission and rank configuration
+
+# Default permissions for all players
+default-permissions:
+  - towny.town.join
+  - towny.town.leave
+  - towny.town.spawn
+  - towny.plot.info
+  - towny.resident.spawn
+
+# Rank-based permissions
+ranks:
+  resident:
+    permissions:
+      - towny.plot.claim
+      - towny.plot.unclaim
+      - towny.plot.buy
+      - towny.plot.sell
+    prefix: "[R]"
+    priority: 1
+
+  vip:
+    permissions:
+      - towny.plot.set
+      - towny.plot.toggle
+    prefix: "[VIP]"
+    priority: 2
+
+  councillor:
+    permissions:
+      - towny.town.invite
+      - towny.town.kick.resident
+    prefix: "[C]"
+    priority: 3
+
+  mayor:
+    permissions:
+      - towny.town.set
+      - towny.town.toggle
+      - towny.town.delete
+      - towny.nation.create
+      - towny.nation.join
+      - towny.nation.leave
+    prefix: "[M]"
+    priority: 4
+
+  king:
+    permissions:
+      - towny.nation.set
+      - towny.nation.toggle
+      - towny.nation.delete
+      - towny.nation.invite
+      - towny.nation.kick
+    prefix: "[K]"
+    priority: 5
+
+# Plot-specific permissions
+plot-permissions:
+  friend-permissions:
+    - build
+    - destroy
+    - switch
+    - itemuse
+
+  ally-permissions:
+    - switch
+    - itemuse

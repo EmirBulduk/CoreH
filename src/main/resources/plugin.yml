@@ -1,0 +1,27 @@
+name: EnhancedCoreH
+version: 1.0.0
+main: org.arch.me.EnhancedCoreH
+description: CoreHistory plugin Enhanced - A comprehensive Towny-like plugin
+author: Arch64
+website: https://papermc.io
+api-version: '1.21'
+depend:
+  - Vault
+  - Essentials
+load: POSTWORLD
+commands:
+  town:
+    description: Manages towns.
+    usage: /<command> [subcommand]
+  nation:
+    description: Manages nations.
+    usage: /<command> [subcommand]
+  plot:
+    description: Manages plots.
+    usage: /<command> [subcommand]
+  resident:
+    description: Manages residents.
+    usage: /<command> [subcommand]
+  towny:
+    description: Admin commands for Towny.
+    usage: /<command> [subcommand]

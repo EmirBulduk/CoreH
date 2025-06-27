@@ -1,0 +1,118 @@
+# messages.yml
+# All plugin messages and localization
+
+# General messages
+general:
+  no-permission: "&cYou don't have permission to do that!"
+  player-not-found: "&cPlayer not found!"
+  invalid-amount: "&cInvalid amount!"
+  insufficient-funds: "&cInsufficient funds!"
+  error: "&cAn error occurred!"
+  player-only: "&cOnly players can use this command!"
+  success: "&aSuccess!"
+  cancelled: "&cCancelled!"
+
+# Town messages
+town:
+  created: "&aSuccessfully created town '{0}'!"
+  deleted: "&aSuccessfully deleted town '{0}'!"
+  joined: "&aYou have joined the town '{0}'!"
+  left: "&aYou have left the town '{0}'!"
+  not-in-town: "&cYou are not in a town!"
+  already-in-town: "&cYou are already in a town!"
+  not-mayor: "&cYou are not the mayor of this town!"
+  chunk-claimed: "&aChunk claimed for town '{0}'!"
+  chunk-unclaimed: "&aChunk unclaimed from town '{0}'!"
+  max-residents-reached: "&cThis town has reached its maximum resident limit!"
+  max-chunks-reached: "&cThis town has reached its maximum chunk limit!"
+  spawn-set: "&aTown spawn has been set!"
+  spawn-teleport: "&aTeleporting to town spawn..."
+  invite-sent: "&aInvitation sent to {0}!"
+  invite-received: "&aYou have been invited to join {0}!"
+  kicked: "&c{0} has been kicked from the town!"
+
+# Nation messages
+nation:
+  created: "&aSuccessfully created nation '{0}'!"
+  deleted: "&aSuccessfully deleted nation '{0}'!"
+  joined: "&aTown '{0}' has joined the nation '{1}'!"
+  left: "&aTown '{0}' has left the nation '{1}'!"
+  not-in-nation: "&cYour town is not in a nation!"
+  already-in-nation: "&cYour town is already in a nation!"
+  not-king: "&cYou are not the king of this nation!"
+  capital-set: "&a{0} is now the capital of {1}!"
+  king-set: "&a{0} is now the king of {1}!"
+
+# Plot messages
+plot:
+  claimed: "&aPlot claimed successfully!"
+  unclaimed: "&aPlot unclaimed successfully!"
+  bought: "&aYou have purchased this plot for {0}!"
+  sold: "&aPlot sold for {0}!"
+  for-sale: "&aPlot is now for sale for {0}!"
+  not-for-sale: "&aPlot removed from sale!"
+  not-owner: "&cYou don't own this plot!"
+  already-owned: "&cThis plot is already owned!"
+  price-set: "&aPlot price set to {0}!"
+
+# Protection messages
+protection:
+  cannot-build: "&cYou cannot build here!"
+  cannot-destroy: "&cYou cannot destroy blocks here!"
+  cannot-interact: "&cYou cannot interact with that!"
+  wilderness: "&cYou are in the wilderness!"
+  pvp-disabled: "&cPvP is disabled in this area!"
+
+# Economy messages
+economy:
+  paid: "&aYou paid {0} to {1}!"
+  received: "&aYou received {0} from {1}!"
+  balance: "&aYour balance: {0}"
+  town-balance: "&aTown balance: {0}"
+  nation-balance: "&aNation balance: {0}"
+  deposited: "&aDeposited {0}!"
+  withdrawn: "&aWithdrew {0}!"
+  tax-collected: "&6Tax collected: {0}"
+  upkeep-paid: "&6Upkeep paid: {0}"
+
+# Resident messages
+resident:
+  friend-added: "&a{0} added as friend!"
+  friend-removed: "&a{0} removed from friends!"
+  friend-already: "&c{0} is already your friend!"
+  friend-not: "&c{0} is not your friend!"
+  title-set: "&aTitle set to: {0}"
+  surname-set: "&aSurname set to: {0}"
+
+# Admin messages
+admin:
+  reload-complete: "&aConfiguration reloaded!"
+  backup-created: "&aBackup created successfully!"
+  database-saved: "&aDatabase saved!"
+  town-created-admin: "&aAdmin created town {0}!"
+  nation-created-admin: "&aAdmin created nation {0}!"
+
+# Time formats
+time:
+  days: "days"
+  hours: "hours"
+  minutes: "minutes"
+  seconds: "seconds"
+
+# Prefixes for different message types
+prefixes:
+  info: "&b[INFO]&f "
+  warning: "&e[WARNING]&f "
+  error: "&c[ERROR]&f "
+  success: "&a[SUCCESS]&f "
+  town: "&6[TOWN]&f "
+  nation: "&5[NATION]&f "
+  plot: "&3[PLOT]&f "
+
+# Help messages
+help:
+  town-commands: "&6Town Commands:"
+  nation-commands: "&5Nation Commands:"
+  plot-commands: "&3Plot Commands:"
+  resident-commands: "&bResident Commands:"
+  admin-commands: "&cAdmin Commands:"

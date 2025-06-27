@@ -1,0 +1,45 @@
+# towns.yml
+# Town-specific configuration
+
+# Default town settings
+default:
+  max-residents: 20
+  max-chunks: 100
+  tax-rate: 0.0
+  upkeep-cost: 10.0
+  spawn-cooldown: 30
+
+# Town creation settings
+creation:
+  cost: 1000.0
+  require-mayor-online: true
+  min-distance-from-other-towns: 5
+
+# Town permissions
+permissions:
+  default-flags:
+    pvp: false
+    explosions: false
+    fire: false
+    mobspawning: false
+    public-spawn: false
+
+  resident-permissions:
+    build: true
+    destroy: true
+    switch: true
+    itemuse: true
+
+  outsider-permissions:
+    build: false
+    destroy: false
+    switch: false
+    itemuse: false
+
+# Town features
+features:
+  allow-nation-joining: true
+  show-entry-messages: true
+  detailed-entry-messages: false
+  auto-claim-on-creation: true
+  require-chunks-connected: false

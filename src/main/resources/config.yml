@@ -1,0 +1,6 @@
+chunks:
+  buffer-zone: 3  # Minimum distance from other towns
+  claim-cost-per-chunk: 50.0
+  wilderness-permissions:
+    build: true
+    destroy: true

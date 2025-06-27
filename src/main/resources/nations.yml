@@ -1,0 +1,36 @@
+# nations.yml
+# Nation-specific configuration
+
+# Default nation settings
+default:
+  max-towns: 50
+  max-chunks: 1000
+  tax-rate: 0.0
+  upkeep-cost: 100.0
+  spawn-cooldown: 60
+
+# Nation creation settings
+creation:
+  cost: 5000.0
+  require-king-online: true
+  require-capital-town: true
+  min-towns-to-create: 1
+
+# Nation permissions
+permissions:
+  default-flags:
+    neutral: true
+    public-spawn: false
+
+  member-permissions:
+    town-invite: false
+    town-kick: false
+    ally-request: false
+    enemy-declare: false
+
+# Nation features
+features:
+  allow-alliances: true
+  allow-wars: false
+  diplomacy-enabled: true
+  capital-teleport: true
