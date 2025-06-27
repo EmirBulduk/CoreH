@@ -58,8 +58,8 @@ public final class EnhancedCoreH extends JavaPlugin {
         // Initialize managers
         playerManager = new PlayerManager(this);
         rankManager = new RankManager(this);
-        chunkManager = new ChunkManager(this);
         townManager = new TownManager(this);
+        chunkManager = new ChunkManager(this);
         nationManager = new NationManager(this);
 
         registerCommands();

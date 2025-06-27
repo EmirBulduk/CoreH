@@ -122,18 +122,13 @@ public class NationManager {
                     return null;
                 }
 
-                // Check economy requirements
-                BigDecimal cost = BigDecimal.valueOf(plugin.getConfigManager().getEconomyValue("nation-creation-cost"));
-                if (!plugin.getEconomyManager().hasTownBalance(capitalTownUuid, cost)) {
-                    return null;
-                }
+                // Economy requirements are handled in the command, so we remove the checks here.
 
                 // Create nation
                 UUID nationUuid = UUID.randomUUID();
                 Nation nation = new Nation(nationUuid, name, kingUuid, capitalTownUuid);
 
-                // Withdraw money from capital town
-                plugin.getEconomyManager().withdrawTown(capitalTownUuid, cost);
+                // Money is withdrawn in the command.
 
                 // Update capital town
                 capitalTown.setNationUuid(nationUuid);
@@ -514,4 +509,3 @@ public class NationManager {
         return nationCache.size();
     }
 }
-
