@@ -56,7 +56,7 @@ public class ChunkManager {
             });
 
             for (ClaimedChunk chunk : chunks) {
-                String key = getChunkKey(chunk.getWorld(), chunk.getX(), chunk.getZ());
+                String key = getChunkKey(chunk.getWorldName(), chunk.getX(), chunk.getZ());
                 claimedChunks.put(key, chunk);
 
                 // Add to town's claimed chunks
@@ -481,7 +481,7 @@ public class ChunkManager {
             }
 
             db.executeUpdate(sql,
-                    chunk.getWorld(),
+                    chunk.getWorldName(),
                     chunk.getX(),
                     chunk.getZ(),
                     chunk.getTownUuid().toString(),

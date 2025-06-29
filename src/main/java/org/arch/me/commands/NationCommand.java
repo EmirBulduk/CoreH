@@ -1,6 +1,7 @@
 package org.arch.me.commands;
 
 import org.arch.me.EnhancedCoreH;
+import org.arch.me.models.ClaimedChunk;
 import org.arch.me.models.Nation;
 import org.arch.me.models.Town;
 import org.arch.me.models.TownyPlayer;
@@ -53,6 +54,7 @@ public class NationCommand implements CommandExecutor, TabCompleter {
             case "list" -> handleList(player, args);
             case "king" -> handleSetKing(player, args);
             case "capital" -> handleSetCapital(player, args);
+            case "capitalchunk" -> handleSetCapitalChunk(player, args);
             default -> showHelp(player);
         }
 
@@ -73,6 +75,54 @@ public class NationCommand implements CommandExecutor, TabCompleter {
         }
 
         displayNationInfo(player, nation);
+    }
+
+    private void handleSetCapitalChunk(Player player, String[] args) {
+        TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(player.getUniqueId());
+        if (townyPlayer == null || !townyPlayer.hasNation()) {
+            player.sendMessage(plugin.getConfigManager().getMessage("nation.not-in-nation"));
+            return;
+        }
+
+        Nation nation = plugin.getNationManager().getNation(townyPlayer.getNationUuid());
+        if (nation == null || !nation.isKing(player.getUniqueId())) {
+            player.sendMessage("§cYou must be the king to set the capital chunk!");
+            return;
+        }
+
+        // Get current chunk
+        org.bukkit.Chunk chunk = player.getLocation().getChunk();
+
+        // Check if chunk is claimed by capital town
+        Town capitalTown = plugin.getTownManager().getTown(nation.getCapitalTownUuid());
+        if (capitalTown == null) {
+            player.sendMessage("§cCapital town not found!");
+            return;
+        }
+
+        boolean isCapitalChunk = false;
+        UUID chunkUuid = null;
+
+        for (ClaimedChunk claimedChunk : capitalTown.getClaimedChunks()) {
+            if (claimedChunk.getChunkX() == chunk.getX() &&
+                    claimedChunk.getChunkZ() == chunk.getZ() &&
+                    claimedChunk.getWorldName().equals(chunk.getWorld().getName())) {
+                isCapitalChunk = true;
+                chunkUuid = claimedChunk.getUuid();
+                break;
+            }
+        }
+
+        if (!isCapitalChunk) {
+            player.sendMessage("§cThis chunk is not claimed by your capital town!");
+            return;
+        }
+
+        nation.setCapitalChunkUuid(chunkUuid);
+        plugin.getNationManager().saveNation(nation);
+
+        player.sendMessage("§aCapital chunk has been set at " + chunk.getX() + ", " + chunk.getZ() + "!");
+        player.sendMessage("§eThis chunk will be used for war capitulation mechanics.");
     }
 
     private void handleCreate(Player player, String[] args) {
@@ -108,22 +158,20 @@ public class NationCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
-        // Check economy requirements using Vault API directly
+        // Check economy requirements
         BigDecimal cost = BigDecimal.valueOf(plugin.getConfigManager().getEconomyValue("nation-creation-cost"));
 
-        // Use Vault API directly for money check and withdrawal
-        if (!plugin.getEconomyManager().hasBalance(player, cost.doubleValue())) {
+        // Use EconomyManager methods consistently
+        if (!plugin.getEconomyManager().hasPlayerBalance(player.getUniqueId(), cost)) {
             player.sendMessage("§cYou don't have enough money! Required: " +
                     plugin.getEconomyManager().format(cost) +
-                    " | You have: " + plugin.getEconomyManager().format(BigDecimal.valueOf(plugin.getEconomyManager().getBalance(player))));
+                    " | You have: " + plugin.getEconomyManager().format(
+                    plugin.getEconomyManager().getPlayerBalance(player.getUniqueId())));
             return;
         }
 
         // Withdraw money first
-        if (!plugin.getEconomyManager().withdrawPlayer(player, cost.doubleValue()).transactionSuccess()) {
-            player.sendMessage("§cFailed to withdraw money for nation creation!");
-            return;
-        }
+        plugin.getEconomyManager().withdrawPlayer(player.getUniqueId(), cost);
 
         // Create nation
         plugin.getNationManager().createNation(nationName, player.getUniqueId(), playerTown.getUuid())
@@ -133,7 +181,7 @@ public class NationCommand implements CommandExecutor, TabCompleter {
                         player.sendMessage("§aDeducted " + plugin.getEconomyManager().format(cost) + " for nation creation.");
                     } else {
                         // Refund money if nation creation failed
-                        plugin.getEconomyManager().depositPlayer(player, cost.doubleValue());
+                        plugin.getEconomyManager().depositPlayer(player.getUniqueId(), cost);
                         player.sendMessage("§cFailed to create nation. Name might already exist. Money has been refunded.");
                     }
                 });
@@ -651,6 +699,11 @@ public class NationCommand implements CommandExecutor, TabCompleter {
         if (nation.getBoard() != null && !nation.getBoard().isEmpty()) {
             player.sendMessage("§eBoard: §f" + nation.getBoard());
         }
+
+        // Show war status if at war
+        if (plugin.getWarManager().isNationAtWar(nation.getUuid())) {
+            player.sendMessage("§c⚔ AT WAR! Use /war status for details.");
+        }
     }
 
     private void showHelp(Player player) {
@@ -670,6 +723,7 @@ public class NationCommand implements CommandExecutor, TabCompleter {
         player.sendMessage("§e/nation list [page] §7- List all nations");
         player.sendMessage("§e/nation king <player> §7- Transfer leadership");
         player.sendMessage("§e/nation capital <town> §7- Set capital town");
+        player.sendMessage("§e/nation capitalchunk §7- Set capital chunk (for wars)");
     }
 
     // Utility methods
@@ -701,7 +755,7 @@ public class NationCommand implements CommandExecutor, TabCompleter {
 
             if (count > 0) towns.append(", ");
 
-            Town town = plugin.getTownManager().getTown(String.valueOf(townUuid));
+            Town town = plugin.getTownManager().getTown(townUuid);
             towns.append(town != null ? town.getName() : "Unknown");
             count++;
         }
@@ -779,3 +833,4 @@ public class NationCommand implements CommandExecutor, TabCompleter {
         return completions;
     }
 }
+

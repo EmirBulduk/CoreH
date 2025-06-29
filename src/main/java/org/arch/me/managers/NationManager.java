@@ -1,64 +1,37 @@
 package org.arch.me.managers;
 
 import org.arch.me.EnhancedCoreH;
-import org.arch.me.database.DatabaseManager;
 import org.arch.me.models.Nation;
 import org.arch.me.models.Town;
 import org.arch.me.models.TownyPlayer;
+import org.bukkit.Bukkit;
 
-import java.math.BigDecimal;
-import java.sql.SQLException;
-import java.sql.Timestamp;
+import java.sql.*;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class NationManager {
-
     private final EnhancedCoreH plugin;
-    private final Map<UUID, Nation> nationCache = new ConcurrentHashMap<>();
-    private final Map<String, UUID> nationNameCache = new ConcurrentHashMap<>();
+    private final Map<UUID, Nation> nationCache;
 
     public NationManager(EnhancedCoreH plugin) {
         this.plugin = plugin;
+        this.nationCache = new ConcurrentHashMap<>();
         loadAllNations();
     }
 
     private void loadAllNations() {
         try {
-            DatabaseManager db = plugin.getDatabaseManager();
-            String sql = "SELECT * FROM %snations".formatted(db.getTablePrefix());
+            String sql = "SELECT * FROM %snations".formatted(plugin.getDatabaseManager().getTablePrefix());
 
-            List<Nation> nations = db.queryList(sql, rs -> {
-                Nation nation = new Nation(
-                        UUID.fromString(rs.getString("uuid")),
-                        rs.getString("name"),
-                        UUID.fromString(rs.getString("king_uuid")),
-                        UUID.fromString(rs.getString("capital_uuid"))
-                );
-
-                nation.setFounded(rs.getTimestamp("founded"));
-                nation.setBalance(BigDecimal.valueOf(rs.getDouble("balance")));
-                nation.setTaxRate(BigDecimal.valueOf(rs.getDouble("tax_rate")));
-                nation.setMaxTowns(rs.getInt("max_towns"));
-                nation.setOpen(rs.getBoolean("is_open"));
-                nation.setPublic(rs.getBoolean("is_public"));
-                nation.setBoard(rs.getString("board"));
-
-                // Load permissions, flags, and metadata
-                loadNationPermissions(nation, rs.getString("permissions"));
-                loadNationFlags(nation, rs.getString("flags"));
-                loadNationMetadata(nation, rs.getString("metadata"));
-
+            List<Nation> nations = plugin.getDatabaseManager().queryList(sql, rs -> {
+                Nation nation = createNationFromResultSet(rs);
                 return nation;
             });
 
             for (Nation nation : nations) {
                 nationCache.put(nation.getUuid(), nation);
-                nationNameCache.put(nation.getName().toLowerCase(), nation.getUuid());
-
-                // Load member towns
-                loadNationTowns(nation);
             }
 
             plugin.getLogger().info("Loaded " + nations.size() + " nations from database");
@@ -69,378 +42,516 @@ public class NationManager {
         }
     }
 
-    private void loadNationTowns(Nation nation) throws SQLException {
-        DatabaseManager db = plugin.getDatabaseManager();
-        String sql = "SELECT uuid FROM %stowns WHERE nation_uuid = ?".formatted(db.getTablePrefix());
-
-        List<UUID> towns = db.queryList(sql, rs -> UUID.fromString(rs.getString("uuid")), nation.getUuid().toString());
-        nation.setTowns(new HashSet<>(towns));
-    }
-
-    private void loadNationPermissions(Nation nation, String permissionsJson) {
-        if (permissionsJson != null && !permissionsJson.isEmpty()) {
-            Set<String> permissions = new HashSet<>(Arrays.asList(permissionsJson.split(",")));
-            nation.setPermissions(permissions);
-        }
-    }
-
-    private void loadNationFlags(Nation nation, String flagsJson) {
-        if (flagsJson != null && !flagsJson.isEmpty()) {
-            Map<String, Boolean> flags = new HashMap<>();
-            String[] flagPairs = flagsJson.split(",");
-            for (String pair : flagPairs) {
-                String[] parts = pair.split(":");
-                if (parts.length == 2) {
-                    flags.put(parts[0], Boolean.parseBoolean(parts[1]));
-                }
-            }
-            nation.setFlags(flags);
-        }
-    }
-
-    private void loadNationMetadata(Nation nation, String metadataJson) {
-        // TODO: Implement JSON parsing for metadata
-    }
-
-    // Nation creation
     public CompletableFuture<Nation> createNation(String name, UUID kingUuid, UUID capitalTownUuid) {
         return CompletableFuture.supplyAsync(() -> {
-            try {
-                // Check if nation name already exists
-                if (nationNameExists(name)) {
-                    return null;
-                }
-
-                // Check if capital town exists and is valid
-                Town capitalTown = plugin.getTownManager().getTown(capitalTownUuid);
-                if (capitalTown == null || capitalTown.hasNation()) {
-                    return null;
-                }
-
-                // Check if king is mayor of capital town
-                if (!capitalTown.isMayor(kingUuid)) {
-                    return null;
-                }
-
-                // Economy requirements are handled in the command, so we remove the checks here.
-
-                // Create nation
-                UUID nationUuid = UUID.randomUUID();
-                Nation nation = new Nation(nationUuid, name, kingUuid, capitalTownUuid);
-
-                // Money is withdrawn in the command.
-
-                // Update capital town
-                capitalTown.setNationUuid(nationUuid);
-                plugin.getTownManager().saveTown(capitalTown);
-
-                // Update all residents of capital town
-                for (UUID residentUuid : capitalTown.getResidents()) {
-                    TownyPlayer resident = plugin.getPlayerManager().getPlayer(residentUuid);
-                    if (resident != null) {
-                        resident.setNationUuid(nationUuid);
-                        plugin.getPlayerManager().savePlayer(resident);
-                    }
-                }
-
-                // Save to database
-                saveNation(nation);
-
-                // Add to cache
-                nationCache.put(nationUuid, nation);
-                nationNameCache.put(name.toLowerCase(), nationUuid);
-
-                plugin.getLogger().info("Created nation: " + name + " with king: " + kingUuid + " and capital: " + capitalTown.getName());
-                return nation;
-
-            } catch (Exception e) {
-                plugin.getLogger().severe("Failed to create nation: " + e.getMessage());
-                e.printStackTrace();
+            if (nationNameExists(name)) {
                 return null;
             }
-        });
-    }
 
-    // Nation deletion
-    public CompletableFuture<Boolean> deleteNation(UUID nationUuid, boolean force) {
-        return CompletableFuture.supplyAsync(() -> {
+            UUID nationUuid = UUID.randomUUID();
+
+            // Get capital town and automatically select a capital chunk
+            Town capitalTown = plugin.getTownManager().getTown(capitalTownUuid);
+            UUID capitalChunkUuid = null;
+
+            if (capitalTown != null && !capitalTown.getClaimedChunks().isEmpty()) {
+                // Prioritize chunks near spawn, or pick randomly if no spawn set
+                if (capitalTown.getSpawn() != null) {
+                    capitalChunkUuid = findBestCapitalChunk(capitalTown);
+                } else {
+                    // Pick first available chunk if no spawn
+                    capitalChunkUuid = capitalTown.getClaimedChunks().iterator().next().getUuid();
+                }
+
+                plugin.getLogger().info("Auto-selected capital chunk " + capitalChunkUuid + " for new nation " + name);
+            }
+
+            Nation nation = new Nation(nationUuid, name, kingUuid, capitalTownUuid, capitalChunkUuid);
+
             try {
-                Nation nation = getNation(nationUuid);
-                if (nation == null) {
-                    return false;
-                }
+                String sql = """
+                    INSERT INTO %snations (uuid, name, king_uuid, capital_town_uuid, capital_chunk_uuid, 
+                                           balance, tax_rate, max_towns, is_open, is_public, board, 
+                                           permissions, flags, metadata, towns) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.formatted(plugin.getDatabaseManager().getTablePrefix());
 
-                // Update all member towns
-                for (UUID townUuid : nation.getTowns()) {
-                    Town town = plugin.getTownManager().getTown(townUuid);
-                    if (town != null) {
-                        town.setNationUuid(null);
-                        plugin.getTownManager().saveTown(town);
-
-                        // Update all residents
-                        for (UUID residentUuid : town.getResidents()) {
-                            TownyPlayer resident = plugin.getPlayerManager().getPlayer(residentUuid);
-                            if (resident != null) {
-                                resident.setNationUuid(null);
-                                plugin.getPlayerManager().savePlayer(resident);
-                            }
-                        }
-                    }
-                }
-
-                // Delete from database
-                DatabaseManager db = plugin.getDatabaseManager();
-                String sql = "DELETE FROM %snations WHERE uuid = ?".formatted(db.getTablePrefix());
-                db.executeUpdate(sql, nationUuid.toString());
-
-                // Remove from cache
-                nationCache.remove(nationUuid);
-                nationNameCache.remove(nation.getName().toLowerCase());
-
-                plugin.getLogger().info("Deleted nation: " + nation.getName());
-                return true;
-
-            } catch (Exception e) {
-                plugin.getLogger().severe("Failed to delete nation: " + e.getMessage());
-                e.printStackTrace();
-                return false;
-            }
-        });
-    }
-
-    // Town joining nation
-    public CompletableFuture<Boolean> addTownToNation(UUID nationUuid, UUID townUuid) {
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                Nation nation = getNation(nationUuid);
-                Town town = plugin.getTownManager().getTown(townUuid);
-
-                if (nation == null || town == null) {
-                    return false;
-                }
-
-                // Check if nation is open or town has invitation
-                if (!nation.isOpen()) {
-                    // TODO: Implement invitation system
-                    return false;
-                }
-
-                // Check if nation can accept more towns
-                if (!nation.canAddTown()) {
-                    return false;
-                }
-
-                // Check if town is already in a nation
-                if (town.hasNation()) {
-                    return false;
-                }
-
-                // Add town to nation
-                nation.addTown(townUuid);
-                town.setNationUuid(nationUuid);
-
-                // Update all residents
-                for (UUID residentUuid : town.getResidents()) {
-                    TownyPlayer resident = plugin.getPlayerManager().getPlayer(residentUuid);
-                    if (resident != null) {
-                        resident.setNationUuid(nationUuid);
-                        plugin.getPlayerManager().savePlayer(resident);
-                    }
-                }
-
-                // Save changes
-                saveNation(nation);
-                plugin.getTownManager().saveTown(town);
-
-                return true;
-
-            } catch (Exception e) {
-                plugin.getLogger().severe("Failed to add town to nation: " + e.getMessage());
-                e.printStackTrace();
-                return false;
-            }
-        });
-    }
-
-    // Town leaving nation
-    public CompletableFuture<Boolean> removeTownFromNation(UUID nationUuid, UUID townUuid) {
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                Nation nation = getNation(nationUuid);
-                Town town = plugin.getTownManager().getTown(townUuid);
-
-                if (nation == null || town == null) {
-                    return false;
-                }
-
-                // Check if it's the capital town
-                if (nation.getCapitalUuid().equals(townUuid)) {
-                    // Capital cannot leave, must dissolve nation or transfer capital
-                    if (nation.getTownCount() > 1) {
-                        return false; // Cannot leave as capital with other towns
-                    }
-                    // If only capital town, dissolve the nation
-                    deleteNation(nationUuid, false);
-                    return true;
-                }
-
-                // Remove town from nation
-                nation.removeTown(townUuid);
-                town.setNationUuid(null);
-
-                // Update all residents
-                for (UUID residentUuid : town.getResidents()) {
-                    TownyPlayer resident = plugin.getPlayerManager().getPlayer(residentUuid);
-                    if (resident != null) {
-                        resident.setNationUuid(null);
-                        plugin.getPlayerManager().savePlayer(resident);
-                    }
-                }
-
-                // Save changes
-                saveNation(nation);
-                plugin.getTownManager().saveTown(town);
-
-                return true;
-
-            } catch (Exception e) {
-                plugin.getLogger().severe("Failed to remove town from nation: " + e.getMessage());
-                e.printStackTrace();
-                return false;
-            }
-        });
-    }
-
-    // Nation management methods
-    public CompletableFuture<Boolean> setNationKing(UUID nationUuid, UUID newKingUuid) {
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                Nation nation = getNation(nationUuid);
-                if (nation == null) {
-                    return false;
-                }
-
-                // Check if new king is a mayor in the nation
-                TownyPlayer newKing = plugin.getPlayerManager().getPlayer(newKingUuid);
-                if (newKing == null || !newKing.hasNation() || !newKing.getNationUuid().equals(nationUuid)) {
-                    return false;
-                }
-
-                Town newKingTown = plugin.getTownManager().getTown(newKing.getTownUuid());
-                if (newKingTown == null || !newKingTown.isMayor(newKingUuid)) {
-                    return false;
-                }
-
-                // Set new king
-                nation.setKingUuid(newKingUuid);
-
-                // Save changes
-                saveNation(nation);
-
-                return true;
-
-            } catch (Exception e) {
-                plugin.getLogger().severe("Failed to set nation king: " + e.getMessage());
-                e.printStackTrace();
-                return false;
-            }
-        });
-    }
-
-    public CompletableFuture<Boolean> setNationCapital(UUID nationUuid, UUID newCapitalUuid) {
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                Nation nation = getNation(nationUuid);
-                Town newCapital = plugin.getTownManager().getTown(newCapitalUuid);
-
-                if (nation == null || newCapital == null) {
-                    return false;
-                }
-
-                // Check if town is in the nation
-                if (!nation.hasTown(newCapitalUuid)) {
-                    return false;
-                }
-
-                // Set new capital
-                nation.setCapitalUuid(newCapitalUuid);
-
-                // Save changes
-                saveNation(nation);
-
-                return true;
-
-            } catch (Exception e) {
-                plugin.getLogger().severe("Failed to set nation capital: " + e.getMessage());
-                e.printStackTrace();
-                return false;
-            }
-        });
-    }
-
-    public void saveNation(Nation nation) {
-        try {
-            DatabaseManager db = plugin.getDatabaseManager();
-
-            String sql;
-            if (db.isSQLServer()) {
-                sql = """
-                    MERGE INTO %snations AS target
-                    USING (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)) AS source 
-                    (uuid, name, king_uuid, capital_uuid, founded, balance, tax_rate, max_towns, is_open, is_public, board, permissions, flags, metadata)
-                    ON target.uuid = source.uuid
-                    WHEN MATCHED THEN
-                        UPDATE SET
-                            name = source.name,
-                            king_uuid = source.king_uuid,
-                            capital_uuid = source.capital_uuid,
-                            balance = source.balance,
-                            tax_rate = source.tax_rate,
-                            max_towns = source.max_towns,
-                            is_open = source.is_open,
-                            is_public = source.is_public,
-                            board = source.board,
-                            permissions = source.permissions,
-                            flags = source.flags,
-                            metadata = source.metadata
-                    WHEN NOT MATCHED THEN
-                        INSERT (uuid, name, king_uuid, capital_uuid, founded, balance, tax_rate, max_towns, is_open, is_public, board, permissions, flags, metadata)
-                        VALUES (source.uuid, source.name, source.king_uuid, source.capital_uuid, source.founded, source.balance, source.tax_rate, source.max_towns, source.is_open, source.is_public, source.board, source.permissions, source.flags, source.metadata);
-                    """.formatted(db.getTablePrefix());
-            } else {
-                sql = """
-                    INSERT INTO %snations (uuid, name, king_uuid, capital_uuid, founded, balance, tax_rate, 
-                    max_towns, is_open, is_public, board, permissions, flags, metadata) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON DUPLICATE KEY UPDATE
-                    name = VALUES(name), king_uuid = VALUES(king_uuid), capital_uuid = VALUES(capital_uuid),
-                    balance = VALUES(balance), tax_rate = VALUES(tax_rate), max_towns = VALUES(max_towns),
-                    is_open = VALUES(is_open), is_public = VALUES(is_public), board = VALUES(board),
-                    permissions = VALUES(permissions), flags = VALUES(flags), metadata = VALUES(metadata)
-                    """.formatted(db.getTablePrefix());
-            }
-
-            db.executeUpdate(sql,
+                plugin.getDatabaseManager().executeUpdate(sql,
                     nation.getUuid().toString(),
                     nation.getName(),
                     nation.getKingUuid().toString(),
-                    nation.getCapitalUuid().toString(),
-                    nation.getFounded(),
-                    nation.getBalance().doubleValue(),
-                    nation.getTaxRate().doubleValue(),
+                    nation.getCapitalTownUuid() != null ? nation.getCapitalTownUuid().toString() : null,
+                    nation.getCapitalChunkUuid() != null ? nation.getCapitalChunkUuid().toString() : null,
+                    nation.getBalance(),
+                    nation.getTaxRate(),
                     nation.getMaxTowns(),
                     nation.isOpen(),
                     nation.isPublic(),
                     nation.getBoard(),
-                    serializePermissions(nation.getPermissions()),
-                    serializeFlags(nation.getFlags()),
-                    serializeMetadata(nation.getMetadata())
+                    plugin.getGson().toJson(nation.getPermissions()),
+                    plugin.getGson().toJson(nation.getFlags()),
+                    plugin.getGson().toJson(nation.getMetadata()),
+                    plugin.getGson().toJson(nation.getTowns())
+                );
+
+                // Update town to belong to nation
+                if (capitalTown != null) {
+                    capitalTown.setNationUuid(nationUuid);
+                    plugin.getTownManager().saveTown(capitalTown);
+                }
+
+                // Update player to be in nation
+                TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(kingUuid);
+                if (townyPlayer != null) {
+                    townyPlayer.setNationUuid(nationUuid);
+                    plugin.getPlayerManager().savePlayer(townyPlayer);
+                }
+
+                // Update war manager if needed
+                if (plugin.getWarManager() != null) {
+                    plugin.getWarManager().handleTownNationChange(capitalTownUuid, null, nationUuid);
+                }
+
+                nationCache.put(nationUuid, nation);
+                return nation;
+
+            } catch (SQLException e) {
+                plugin.getLogger().severe("Failed to create nation: " + e.getMessage());
+                e.printStackTrace();
+                return null;
+            }
+        }, Bukkit.getScheduler().getMainThreadExecutor(plugin));
+    }
+
+    /**
+     * Find the best capital chunk - prioritizes chunks near town spawn
+     */
+    private UUID findBestCapitalChunk(Town town) {
+        if (town.getSpawn() == null || town.getClaimedChunks().isEmpty()) {
+            return town.getClaimedChunks().iterator().next().getUuid();
+        }
+
+        int spawnChunkX = town.getSpawn().getChunk().getX();
+        int spawnChunkZ = town.getSpawn().getChunk().getZ();
+        String spawnWorld = town.getSpawn().getWorld().getName();
+
+        // Find chunk closest to spawn
+        UUID bestChunk = null;
+        double closestDistance = Double.MAX_VALUE;
+
+        for (org.arch.me.models.ClaimedChunk chunk : town.getClaimedChunks()) {
+            if (!chunk.getWorldName().equals(spawnWorld)) continue;
+
+            double distance = Math.sqrt(
+                Math.pow(chunk.getX() - spawnChunkX, 2) +
+                Math.pow(chunk.getZ() - spawnChunkZ, 2)
             );
+
+            if (distance < closestDistance) {
+                closestDistance = distance;
+                bestChunk = chunk.getUuid();
+            }
+        }
+
+        return bestChunk != null ? bestChunk : town.getClaimedChunks().iterator().next().getUuid();
+    }
+
+    /**
+     * Change nation capital chunk - expensive operation only for kings
+     */
+    public CompletableFuture<Boolean> setCapitalChunk(UUID nationUuid, UUID kingUuid, UUID newCapitalChunkUuid) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                Nation nation = getNation(nationUuid);
+                if (nation == null || !nation.isKing(kingUuid)) {
+                    return false;
+                }
+
+                // Check if the chunk belongs to the capital town
+                Town capitalTown = plugin.getTownManager().getTown(nation.getCapitalTownUuid());
+                if (capitalTown == null) {
+                    return false;
+                }
+
+                boolean chunkBelongsToCapital = capitalTown.getClaimedChunks().stream()
+                    .anyMatch(chunk -> chunk.getUuid().equals(newCapitalChunkUuid));
+
+                if (!chunkBelongsToCapital) {
+                    return false;
+                }
+
+                // Calculate expensive cost for changing capital chunk
+                java.math.BigDecimal cost = java.math.BigDecimal.valueOf(
+                    plugin.getConfigManager().getEconomyValue("capital-chunk-change-cost")
+                );
+
+                // Check if nation has enough funds
+                if (!plugin.getEconomyManager().hasNationBalance(nationUuid, cost)) {
+                    plugin.getLogger().info("Nation " + nation.getName() + " lacks funds to change capital chunk. Required: " + cost);
+                    return false;
+                }
+
+                // Withdraw cost
+                if (!plugin.getEconomyManager().withdrawNation(nationUuid, cost)) {
+                    return false;
+                }
+
+                // Update capital chunk
+                nation.setCapitalChunkUuid(newCapitalChunkUuid);
+                saveNation(nation);
+
+                plugin.getLogger().info("Nation " + nation.getName() + " changed capital chunk to " + newCapitalChunkUuid + " for cost " + cost);
+                return true;
+
+            } catch (Exception e) {
+                plugin.getLogger().severe("Failed to set capital chunk: " + e.getMessage());
+                e.printStackTrace();
+                return false;
+            }
+        }, Bukkit.getScheduler().getMainThreadExecutor(plugin));
+    }
+
+    public CompletableFuture<Boolean> deleteNation(UUID nationUuid, boolean force) {
+        return CompletableFuture.supplyAsync(() -> {
+            Nation nation = getNation(nationUuid);
+            if (nation == null) return false;
+
+            try {
+                // Remove all towns from nation
+                for (UUID townUuid : new HashSet<>(nation.getTowns())) {
+                    removeTownFromNationSync(nationUuid, townUuid);
+                }
+
+                String sql = "DELETE FROM %snations WHERE uuid = ?".formatted(plugin.getDatabaseManager().getTablePrefix());
+                plugin.getDatabaseManager().executeUpdate(sql, nationUuid.toString());
+
+                nationCache.remove(nationUuid);
+                return true;
+
+            } catch (SQLException e) {
+                plugin.getLogger().severe("Failed to delete nation: " + e.getMessage());
+                e.printStackTrace();
+                return false;
+            }
+        }, Bukkit.getScheduler().getMainThreadExecutor(plugin));
+    }
+
+    public CompletableFuture<Boolean> addTownToNation(UUID nationUuid, UUID townUuid) {
+        return CompletableFuture.supplyAsync(() -> {
+            return addTownToNationSync(nationUuid, townUuid);
+        }, Bukkit.getScheduler().getMainThreadExecutor(plugin));
+    }
+
+    private boolean addTownToNationSync(UUID nationUuid, UUID townUuid) {
+        Nation nation = getNation(nationUuid);
+        Town town = plugin.getTownManager().getTown(townUuid);
+
+        if (nation == null || town == null || town.hasNation()) {
+            return false;
+        }
+
+        if (!nation.canAddTown()) {
+            return false;
+        }
+
+        nation.addTown(townUuid);
+        town.setNationUuid(nationUuid);
+
+        saveNation(nation);
+        plugin.getTownManager().saveTown(town);
+
+        // Update all town residents to be in nation
+        for (UUID residentUuid : town.getResidents()) {
+            TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(residentUuid);
+            if (townyPlayer != null) {
+                townyPlayer.setNationUuid(nationUuid);
+                plugin.getPlayerManager().savePlayer(townyPlayer);
+            }
+        }
+
+        // Update war manager
+        if (plugin.getWarManager() != null) {
+            plugin.getWarManager().handleTownNationChange(townUuid, null, nationUuid);
+        }
+
+        return true;
+    }
+
+    public CompletableFuture<Boolean> removeTownFromNation(UUID nationUuid, UUID townUuid) {
+        return CompletableFuture.supplyAsync(() -> {
+            return removeTownFromNationSync(nationUuid, townUuid);
+        }, Bukkit.getScheduler().getMainThreadExecutor(plugin));
+    }
+
+    private boolean removeTownFromNationSync(UUID nationUuid, UUID townUuid) {
+        Nation nation = getNation(nationUuid);
+        Town town = plugin.getTownManager().getTown(townUuid);
+
+        if (nation == null || town == null || !nation.hasTown(townUuid)) {
+            return false;
+        }
+
+        // Can't remove capital town unless it's the last town
+        if (nation.isCapitalTown(townUuid) && nation.getTownCount() > 1) {
+            return false;
+        }
+
+        nation.removeTown(townUuid);
+        town.setNationUuid(null);
+
+        saveNation(nation);
+        plugin.getTownManager().saveTown(town);
+
+        // Update all town residents to not be in nation
+        for (UUID residentUuid : town.getResidents()) {
+            TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(residentUuid);
+            if (townyPlayer != null) {
+                townyPlayer.setNationUuid(null);
+                plugin.getPlayerManager().savePlayer(townyPlayer);
+            }
+        }
+
+        // Update war manager
+        if (plugin.getWarManager() != null) {
+            plugin.getWarManager().handleTownNationChange(townUuid, nationUuid, null);
+        }
+
+        return true;
+    }
+
+    public CompletableFuture<Boolean> setNationKing(UUID nationUuid, UUID newKingUuid) {
+        return CompletableFuture.supplyAsync(() -> {
+            Nation nation = getNation(nationUuid);
+            if (nation == null) return false;
+
+            // Check if new king is a mayor in the nation
+            TownyPlayer newKing = plugin.getPlayerManager().getPlayer(newKingUuid);
+            if (newKing == null || !newKing.hasNation() || !newKing.getNationUuid().equals(nationUuid)) {
+                return false;
+            }
+
+            Town newKingTown = plugin.getTownManager().getTown(newKing.getTownUuid());
+            if (newKingTown == null || !newKingTown.isMayor(newKingUuid)) {
+                return false;
+            }
+
+            nation.setKingUuid(newKingUuid);
+            saveNation(nation);
+            return true;
+        }, Bukkit.getScheduler().getMainThreadExecutor(plugin));
+    }
+
+    public CompletableFuture<Boolean> setNationCapital(UUID nationUuid, UUID newCapitalUuid) {
+        return CompletableFuture.supplyAsync(() -> {
+            Nation nation = getNation(nationUuid);
+            if (nation == null || !nation.hasTown(newCapitalUuid)) {
+                return false;
+            }
+
+            Town newCapital = plugin.getTownManager().getTown(newCapitalUuid);
+            if (newCapital == null) return false;
+
+            nation.setCapitalTownUuid(newCapitalUuid);
+
+            // Set capital chunk to first chunk of new capital
+            if (!newCapital.getClaimedChunks().isEmpty()) {
+                UUID capitalChunkUuid = newCapital.getClaimedChunks().iterator().next().getUuid();
+                nation.setCapitalChunkUuid(capitalChunkUuid);
+            }
+
+            saveNation(nation);
+            return true;
+        }, Bukkit.getScheduler().getMainThreadExecutor(plugin));
+    }
+
+    public void saveNation(Nation nation) {
+        if (nation == null) return;
+
+        try {
+            String sql = """
+                UPDATE %snations SET name = ?, king_uuid = ?, capital_town_uuid = ?, capital_chunk_uuid = ?,
+                                 balance = ?, tax_rate = ?, max_towns = ?, is_open = ?, is_public = ?, 
+                                 board = ?, permissions = ?, flags = ?, metadata = ?, towns = ?
+                WHERE uuid = ?
+            """.formatted(plugin.getDatabaseManager().getTablePrefix());
+
+            plugin.getDatabaseManager().executeUpdate(sql,
+                nation.getName(),
+                nation.getKingUuid().toString(),
+                nation.getCapitalTownUuid() != null ? nation.getCapitalTownUuid().toString() : null,
+                nation.getCapitalChunkUuid() != null ? nation.getCapitalChunkUuid().toString() : null,
+                nation.getBalance(),
+                nation.getTaxRate(),
+                nation.getMaxTowns(),
+                nation.isOpen(),
+                nation.isPublic(),
+                nation.getBoard(),
+                plugin.getGson().toJson(nation.getPermissions()),
+                plugin.getGson().toJson(nation.getFlags()),
+                plugin.getGson().toJson(nation.getMetadata()),
+                plugin.getGson().toJson(nation.getTowns()),
+                nation.getUuid().toString()
+            );
+
+            nationCache.put(nation.getUuid(), nation);
 
         } catch (SQLException e) {
             plugin.getLogger().severe("Failed to save nation: " + e.getMessage());
             e.printStackTrace();
         }
+    }
+
+    public int getNationCount() {
+        return nationCache.size();
+    }
+
+    public Nation getNation(UUID uuid) {
+        if (uuid == null) return null;
+
+        Nation cached = nationCache.get(uuid);
+        if (cached != null) return cached;
+
+        try {
+            String sql = "SELECT * FROM %snations WHERE uuid = ?".formatted(plugin.getDatabaseManager().getTablePrefix());
+            Nation nation = plugin.getDatabaseManager().queryObject(sql, this::createNationFromResultSet, uuid.toString());
+
+            if (nation != null) {
+                nationCache.put(uuid, nation);
+            }
+            return nation;
+
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Failed to get nation: " + e.getMessage());
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    public Nation getNation(String name) {
+        if (name == null) return null;
+
+        // Check cache first
+        for (Nation nation : nationCache.values()) {
+            if (nation.getName().equalsIgnoreCase(name)) {
+                return nation;
+            }
+        }
+
+        try {
+            String sql = "SELECT * FROM %snations WHERE LOWER(name) = LOWER(?)".formatted(plugin.getDatabaseManager().getTablePrefix());
+            Nation nation = plugin.getDatabaseManager().queryObject(sql, this::createNationFromResultSet, name);
+
+            if (nation != null) {
+                nationCache.put(nation.getUuid(), nation);
+            }
+            return nation;
+
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Failed to get nation by name: " + e.getMessage());
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    public boolean nationNameExists(String name) {
+        return getNation(name) != null;
+    }
+
+    public Collection<Nation> getAllNations() {
+        if (!nationCache.isEmpty()) {
+            return new ArrayList<>(nationCache.values());
+        }
+
+        try {
+            String sql = "SELECT * FROM %snations".formatted(plugin.getDatabaseManager().getTablePrefix());
+            List<Nation> nations = plugin.getDatabaseManager().queryList(sql, this::createNationFromResultSet);
+
+            for (Nation nation : nations) {
+                nationCache.put(nation.getUuid(), nation);
+            }
+
+            return nations;
+
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Failed to get all nations: " + e.getMessage());
+            e.printStackTrace();
+            return new ArrayList<>();
+        }
+    }
+
+    private Nation createNationFromResultSet(ResultSet rs) throws SQLException {
+        UUID uuid = UUID.fromString(rs.getString("uuid"));
+        String name = rs.getString("name");
+        UUID kingUuid = UUID.fromString(rs.getString("king_uuid"));
+
+        String capitalTownUuidStr = rs.getString("capital_town_uuid");
+        UUID capitalTownUuid = capitalTownUuidStr != null ? UUID.fromString(capitalTownUuidStr) : null;
+
+        String capitalChunkUuidStr = rs.getString("capital_chunk_uuid");
+        UUID capitalChunkUuid = capitalChunkUuidStr != null ? UUID.fromString(capitalChunkUuidStr) : null;
+
+        Nation nation = new Nation(uuid, name, kingUuid, capitalTownUuid, capitalChunkUuid);
+
+        nation.setFounded(rs.getTimestamp("founded"));
+        nation.setBalance(rs.getBigDecimal("balance"));
+        nation.setTaxRate(rs.getBigDecimal("tax_rate"));
+        nation.setMaxTowns(rs.getInt("max_towns"));
+        nation.setOpen(rs.getBoolean("is_open"));
+        nation.setPublic(rs.getBoolean("is_public"));
+        nation.setBoard(rs.getString("board"));
+
+        // Deserialize JSON fields
+        String permissionsJson = rs.getString("permissions");
+        if (permissionsJson != null && !permissionsJson.isEmpty()) {
+            try {
+                Set<String> permissions = plugin.getGson().fromJson(permissionsJson, Set.class);
+                nation.setPermissions(permissions != null ? permissions : new HashSet<>());
+            } catch (Exception e) {
+                nation.setPermissions(new HashSet<>());
+            }
+        }
+
+        String flagsJson = rs.getString("flags");
+        if (flagsJson != null && !flagsJson.isEmpty()) {
+            try {
+                Map<String, Boolean> flags = plugin.getGson().fromJson(flagsJson, Map.class);
+                nation.setFlags(flags != null ? flags : new HashMap<>());
+            } catch (Exception e) {
+                nation.setFlags(new HashMap<>());
+            }
+        }
+
+        String metadataJson = rs.getString("metadata");
+        if (metadataJson != null && !metadataJson.isEmpty()) {
+            try {
+                Map<String, Object> metadata = plugin.getGson().fromJson(metadataJson, Map.class);
+                nation.setMetadata(metadata != null ? metadata : new HashMap<>());
+            } catch (Exception e) {
+                nation.setMetadata(new HashMap<>());
+            }
+        }
+
+        String townsJson = rs.getString("towns");
+        if (townsJson != null && !townsJson.isEmpty()) {
+            try {
+                Set<String> townStrings = plugin.getGson().fromJson(townsJson, Set.class);
+                if (townStrings != null) {
+                    Set<UUID> townUuids = new HashSet<>();
+                    for (Object townObj : townStrings) {
+                        try {
+                            townUuids.add(UUID.fromString(townObj.toString()));
+                        } catch (IllegalArgumentException e) {
+                            plugin.getLogger().warning("Invalid town UUID in nation " + name + ": " + townObj);
+                        }
+                    }
+                    nation.setTowns(townUuids);
+                }
+            } catch (Exception e) {
+                nation.setTowns(new HashSet<>());
+            }
+        }
+
+        return nation;
     }
 
     public void saveAll() {
@@ -449,63 +560,12 @@ public class NationManager {
         }
     }
 
-    // Utility methods
-    private String serializePermissions(Set<String> permissions) {
-        return String.join(",", permissions);
+    public void clearCache() {
+        nationCache.clear();
     }
 
-    private String serializeFlags(Map<String, Boolean> flags) {
-        StringBuilder sb = new StringBuilder();
-        for (Map.Entry<String, Boolean> entry : flags.entrySet()) {
-            if (sb.length() > 0) sb.append(",");
-            sb.append(entry.getKey()).append(":").append(entry.getValue());
-        }
-        return sb.toString();
-    }
-
-    private String serializeMetadata(Map<String, Object> metadata) {
-        return ""; // TODO: Implement JSON serialization
-    }
-
-    // Getters
-    public Nation getNation(UUID uuid) {
-        return nationCache.get(uuid);
-    }
-
-    public Nation getNation(String name) {
-        UUID uuid = nationNameCache.get(name.toLowerCase());
-        return uuid != null ? nationCache.get(uuid) : null;
-    }
-
-    public Collection<Nation> getAllNations() {
-        return nationCache.values();
-    }
-
-    public boolean nationExists(UUID uuid) {
-        return nationCache.containsKey(uuid);
-    }
-
-    public boolean nationNameExists(String name) {
-        return nationNameCache.containsKey(name.toLowerCase());
-    }
-
-    public Nation getNationByPlayer(UUID playerUuid) {
-        TownyPlayer player = plugin.getPlayerManager().getPlayer(playerUuid);
-        if (player != null && player.hasNation()) {
-            return getNation(player.getNationUuid());
-        }
-        return null;
-    }
-
-    public Nation getNationByTown(UUID townUuid) {
-        Town town = plugin.getTownManager().getTown(townUuid);
-        if (town != null && town.hasNation()) {
-            return getNation(town.getNationUuid());
-        }
-        return null;
-    }
-
-    public int getNationCount() {
-        return nationCache.size();
+    public void removeFromCache(UUID uuid) {
+        nationCache.remove(uuid);
     }
 }
+

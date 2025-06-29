@@ -1,5 +1,6 @@
 package org.arch.me;
 
+import com.google.gson.Gson;
 import org.arch.me.commands.*;
 import org.arch.me.config.ConfigManager;
 import org.arch.me.database.DatabaseManager;
@@ -17,7 +18,7 @@ import java.lang.reflect.Field;
 import java.util.List;
 
 public final class EnhancedCoreH extends JavaPlugin {
-
+    private Gson gson;
     private static EnhancedCoreH instance;
     private DatabaseManager databaseManager;
     private ConfigManager configManager;
@@ -27,12 +28,12 @@ public final class EnhancedCoreH extends JavaPlugin {
     private PlayerManager playerManager;
     private ChunkManager chunkManager;
     private RankManager rankManager;
-
-
+    private WarManager warManager;
 
     @Override
     public void onEnable() {
         instance = this;
+        this.gson = new Gson();
 
         // Initialize configuration
         configManager = new ConfigManager(this);
@@ -61,6 +62,7 @@ public final class EnhancedCoreH extends JavaPlugin {
         townManager = new TownManager(this);
         chunkManager = new ChunkManager(this);
         nationManager = new NationManager(this);
+        warManager = new WarManager(this);
 
         registerCommands();
 
@@ -71,6 +73,10 @@ public final class EnhancedCoreH extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (warManager != null) {
+            warManager.shutdown();
+        }
+
         if (databaseManager != null) {
             databaseManager.closeConnection();
         }
@@ -99,6 +105,7 @@ public final class EnhancedCoreH extends JavaPlugin {
             registerCommand(commandMap, "plot", new PlotCommand(this), "Manages plots");
             registerCommand(commandMap, "resident", new ResidentCommand(this), "Manages residents");
             registerCommand(commandMap, "towny", new TownyAdminCommand(this), "Admin commands");
+            registerCommand(commandMap, "war", new WarCommand(this), "War system commands");
 
             getLogger().info("Successfully registered all commands!");
 
@@ -159,9 +166,14 @@ public final class EnhancedCoreH extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new ChunkProtectionListener(this), this);
         getServer().getPluginManager().registerEvents(new TownListener(this), this);
         getServer().getPluginManager().registerEvents(new EconomyListener(this), this);
+        getServer().getPluginManager().registerEvents(new WarListener(this), this);
     }
 
     // Getters
+    public Gson getGson() {
+        return gson;
+    }
+
     public static EnhancedCoreH getInstance() {
         return instance;
     }
@@ -196,5 +208,9 @@ public final class EnhancedCoreH extends JavaPlugin {
 
     public RankManager getRankManager() {
         return rankManager;
+    }
+
+    public WarManager getWarManager() {
+        return warManager;
     }
 }

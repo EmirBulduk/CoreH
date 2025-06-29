@@ -62,6 +62,15 @@ public class TownManager {
                 town.setTaxRate(BigDecimal.valueOf(rs.getDouble("tax_rate")));
                 town.setUpkeepCost(BigDecimal.valueOf(rs.getDouble("upkeep_cost")));
                 town.setMaxResidents(rs.getInt("max_residents"));
+
+                // Handle max_chunks with fallback for existing towns
+                try {
+                    town.setMaxChunks(rs.getInt("max_chunks"));
+                } catch (SQLException e) {
+                    // Column doesn't exist or is null, set default value
+                    town.setMaxChunks(50);
+                }
+
                 town.setOpen(rs.getBoolean("is_open"));
                 town.setPublic(rs.getBoolean("is_public"));
                 town.setBoard(rs.getString("board"));

@@ -18,6 +18,7 @@ public class Town {
     private BigDecimal taxRate;
     private BigDecimal upkeepCost;
     private int maxResidents;
+    private int maxChunks; // Added missing field
     private boolean isOpen;
     private boolean isPublic;
     private String board;
@@ -36,6 +37,7 @@ public class Town {
         this.taxRate = BigDecimal.ZERO;
         this.upkeepCost = BigDecimal.ZERO;
         this.maxResidents = 20;
+        this.maxChunks = 10; // Default chunk limit
         this.isOpen = true;
         this.isPublic = false;
         this.permissions = new HashSet<>();
@@ -130,6 +132,14 @@ public class Town {
 
     public void setMaxResidents(int maxResidents) {
         this.maxResidents = maxResidents;
+    }
+
+    public int getMaxChunks() {
+        return maxChunks;
+    }
+
+    public void setMaxChunks(int maxChunks) {
+        this.maxChunks = maxChunks;
     }
 
     public boolean isOpen() {
@@ -243,5 +253,13 @@ public class Town {
 
     public int getClaimedChunkCount() {
         return claimedChunks.size();
+    }
+
+    public boolean canClaimMoreChunks() {
+        return claimedChunks.size() < maxChunks;
+    }
+
+    public int getRemainingChunkSlots() {
+        return Math.max(0, maxChunks - claimedChunks.size());
     }
 }

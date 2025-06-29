@@ -72,8 +72,7 @@ public class DatabaseManager {
     }
 
     private void createTables() throws SQLException {
-        // FIXED: SQL Server syntax - using NVARCHAR instead of VARCHAR for Unicode support
-        // and different timestamp handling
+        // FIXED: SQL Server syntax - using proper conditional table creation
         executeUpdate("""
         IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='%splayers' AND xtype='U')
         CREATE TABLE %splayers (
@@ -130,13 +129,15 @@ public class DatabaseManager {
         executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_towns_name') " +
                 "CREATE INDEX idx_towns_name ON %stowns(name)".formatted(tablePrefix));
 
+        // Fixed nations table creation
         executeUpdate("""
         IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='%snations' AND xtype='U')
         CREATE TABLE %snations (
             uuid NVARCHAR(36) PRIMARY KEY,
             name NVARCHAR(32) UNIQUE NOT NULL,
             king_uuid NVARCHAR(36) NOT NULL,
-            capital_uuid NVARCHAR(36) NOT NULL,
+            capital_town_uuid NVARCHAR(36),
+            capital_chunk_uuid NVARCHAR(36),
             founded DATETIME2 DEFAULT GETDATE(),
             balance DECIMAL(15,2) DEFAULT 0.00,
             tax_rate DECIMAL(5,2) DEFAULT 0.00,
@@ -146,14 +147,15 @@ public class DatabaseManager {
             board NTEXT,
             permissions NTEXT,
             flags NTEXT,
-            metadata NTEXT
+            metadata NTEXT,
+            towns NTEXT
         )
         """.formatted(tablePrefix, tablePrefix));
 
         executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_nations_king') " +
                 "CREATE INDEX idx_nations_king ON %snations(king_uuid)".formatted(tablePrefix));
         executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_nations_capital') " +
-                "CREATE INDEX idx_nations_capital ON %snations(capital_uuid)".formatted(tablePrefix));
+                "CREATE INDEX idx_nations_capital ON %snations(capital_town_uuid)".formatted(tablePrefix));
         executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_nations_name') " +
                 "CREATE INDEX idx_nations_name ON %snations(name)".formatted(tablePrefix));
 
@@ -222,6 +224,63 @@ public class DatabaseManager {
                 "CREATE INDEX idx_transactions_type ON %stransactions(type)".formatted(tablePrefix));
         executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_transactions_timestamp') " +
                 "CREATE INDEX idx_transactions_timestamp ON %stransactions(timestamp)".formatted(tablePrefix));
+
+        // War system tables
+        executeUpdate("""
+        IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='%swars' AND xtype='U')
+        CREATE TABLE %swars (
+            id BIGINT IDENTITY(1,1) PRIMARY KEY,
+            declaring_nation_uuid NVARCHAR(36) NOT NULL,
+            defending_nation_uuid NVARCHAR(36) NOT NULL,
+            war_name NVARCHAR(64) NOT NULL,
+            status NVARCHAR(32) NOT NULL,
+            declared_date DATETIME2 DEFAULT GETDATE(),
+            start_date DATETIME2 NULL,
+            end_date DATETIME2 NULL,
+            metadata NTEXT
+        )
+        """.formatted(tablePrefix, tablePrefix));
+
+        executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_wars_declaring') " +
+                "CREATE INDEX idx_wars_declaring ON %swars(declaring_nation_uuid)".formatted(tablePrefix));
+        executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_wars_defending') " +
+                "CREATE INDEX idx_wars_defending ON %swars(defending_nation_uuid)".formatted(tablePrefix));
+        executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_wars_status') " +
+                "CREATE INDEX idx_wars_status ON %swars(status)".formatted(tablePrefix));
+
+        executeUpdate("""
+        IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='%swar_participants' AND xtype='U')
+        CREATE TABLE %swar_participants (
+            id BIGINT IDENTITY(1,1) PRIMARY KEY,
+            war_id BIGINT NOT NULL,
+            nation_uuid NVARCHAR(36) NOT NULL,
+            side NVARCHAR(16) NOT NULL,
+            joined_date DATETIME2 DEFAULT GETDATE(),
+            FOREIGN KEY (war_id) REFERENCES %swars(id) ON DELETE CASCADE
+        )
+        """.formatted(tablePrefix, tablePrefix, tablePrefix));
+
+        executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_war_participants_war') " +
+                "CREATE INDEX idx_war_participants_war ON %swar_participants(war_id)".formatted(tablePrefix));
+        executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_war_participants_nation') " +
+                "CREATE INDEX idx_war_participants_nation ON %swar_participants(nation_uuid)".formatted(tablePrefix));
+
+        // War towns table - to track which towns are in which wars
+        executeUpdate("""
+        IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='%swar_towns' AND xtype='U')
+        CREATE TABLE %swar_towns (
+            id BIGINT IDENTITY(1,1) PRIMARY KEY,
+            war_id BIGINT NOT NULL,
+            town_uuid NVARCHAR(36) NOT NULL,
+            side NVARCHAR(16) NOT NULL,
+            FOREIGN KEY (war_id) REFERENCES %swars(id) ON DELETE CASCADE
+        )
+        """.formatted(tablePrefix, tablePrefix, tablePrefix));
+
+        executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_war_towns_war') " +
+                "CREATE INDEX idx_war_towns_war ON %swar_towns(war_id)".formatted(tablePrefix));
+        executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_war_towns_town') " +
+                "CREATE INDEX idx_war_towns_town ON %swar_towns(town_uuid)".formatted(tablePrefix));
 
         // Insert default ranks
         insertDefaultRanks();

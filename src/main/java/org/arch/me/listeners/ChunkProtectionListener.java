@@ -393,6 +393,12 @@ public class ChunkProtectionListener implements Listener {
             return false;
         }
 
+        // WAR SYSTEM INTEGRATION: Check if chunks are unprotected due to war
+        if (!plugin.getWarManager().isChunkProtectedFromPlayer(chunk, player)) {
+            // During war, allow all actions between enemy nations
+            return true;
+        }
+
         // Check if player is resident of the town
         if (town.hasResident(player.getUniqueId())) {
             return true; // Residents can do anything in their town

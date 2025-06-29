@@ -9,7 +9,8 @@ public class Nation {
     private UUID uuid;
     private String name;
     private UUID kingUuid;
-    private UUID capitalUuid;
+    private UUID capitalTownUuid; // Capital town
+    private UUID capitalChunkUuid; // Capital chunk for wars
     private Timestamp founded;
     private BigDecimal balance;
     private BigDecimal taxRate;
@@ -22,11 +23,12 @@ public class Nation {
     private Map<String, Object> metadata;
     private Set<UUID> towns;
 
-    public Nation(UUID uuid, String name, UUID kingUuid, UUID capitalUuid) {
+    public Nation(UUID uuid, String name, UUID kingUuid, UUID capitalTownUuid, UUID capitalChunkUuid) {
         this.uuid = uuid;
         this.name = name;
         this.kingUuid = kingUuid;
-        this.capitalUuid = capitalUuid;
+        this.capitalTownUuid = capitalTownUuid;
+        this.capitalChunkUuid = capitalChunkUuid;
         this.founded = new Timestamp(System.currentTimeMillis());
         this.balance = BigDecimal.ZERO;
         this.taxRate = BigDecimal.ZERO;
@@ -39,128 +41,74 @@ public class Nation {
         this.towns = new HashSet<>();
 
         // Add capital town
-        towns.add(capitalUuid);
+        if (capitalTownUuid != null) {
+            towns.add(capitalTownUuid);
+        }
     }
 
-    // Getters and setters
-    public UUID getUuid() {
-        return uuid;
+    // Getters and Setters
+    public UUID getUuid() { return uuid; }
+    public void setUuid(UUID uuid) { this.uuid = uuid; }
+
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+
+    public UUID getKingUuid() { return kingUuid; }
+    public void setKingUuid(UUID kingUuid) { this.kingUuid = kingUuid; }
+
+    // Fixed: Consistent method naming
+    public UUID getCapitalUuid() { return capitalTownUuid; }
+    public void setCapitalUuid(UUID capitalUuid) { this.capitalTownUuid = capitalUuid; }
+
+    public UUID getCapitalTownUuid() { return capitalTownUuid; }
+    public void setCapitalTownUuid(UUID capitalTownUuid) {
+        this.capitalTownUuid = capitalTownUuid;
+        // Ensure capital town is in the towns set
+        if (capitalTownUuid != null && !towns.contains(capitalTownUuid)) {
+            towns.add(capitalTownUuid);
+        }
     }
 
-    public void setUuid(UUID uuid) {
-        this.uuid = uuid;
-    }
+    public UUID getCapitalChunkUuid() { return capitalChunkUuid; }
+    public void setCapitalChunkUuid(UUID capitalChunkUuid) { this.capitalChunkUuid = capitalChunkUuid; }
 
-    public String getName() {
-        return name;
-    }
+    public Timestamp getFounded() { return founded; }
+    public void setFounded(Timestamp founded) { this.founded = founded; }
 
-    public void setName(String name) {
-        this.name = name;
-    }
+    public BigDecimal getBalance() { return balance; }
+    public void setBalance(BigDecimal balance) { this.balance = balance; }
 
-    public UUID getKingUuid() {
-        return kingUuid;
-    }
+    public BigDecimal getTaxRate() { return taxRate; }
+    public void setTaxRate(BigDecimal taxRate) { this.taxRate = taxRate; }
 
-    public void setKingUuid(UUID kingUuid) {
-        this.kingUuid = kingUuid;
-    }
+    public int getMaxTowns() { return maxTowns; }
+    public void setMaxTowns(int maxTowns) { this.maxTowns = maxTowns; }
 
-    public UUID getCapitalUuid() {
-        return capitalUuid;
-    }
+    public boolean isOpen() { return isOpen; }
+    public void setOpen(boolean open) { isOpen = open; }
 
-    public void setCapitalUuid(UUID capitalUuid) {
-        this.capitalUuid = capitalUuid;
-    }
+    public boolean isPublic() { return isPublic; }
+    public void setPublic(boolean aPublic) { isPublic = aPublic; }
 
-    public Timestamp getFounded() {
-        return founded;
-    }
+    public String getBoard() { return board; }
+    public void setBoard(String board) { this.board = board; }
 
-    public void setFounded(Timestamp founded) {
-        this.founded = founded;
-    }
+    public Set<String> getPermissions() { return permissions; }
+    public void setPermissions(Set<String> permissions) { this.permissions = permissions; }
 
-    public BigDecimal getBalance() {
-        return balance;
-    }
+    public Map<String, Boolean> getFlags() { return flags; }
+    public void setFlags(Map<String, Boolean> flags) { this.flags = flags; }
 
-    public void setBalance(BigDecimal balance) {
-        this.balance = balance;
-    }
+    public Map<String, Object> getMetadata() { return metadata; }
+    public void setMetadata(Map<String, Object> metadata) { this.metadata = metadata; }
 
-    public BigDecimal getTaxRate() {
-        return taxRate;
-    }
-
-    public void setTaxRate(BigDecimal taxRate) {
-        this.taxRate = taxRate;
-    }
-
-    public int getMaxTowns() {
-        return maxTowns;
-    }
-
-    public void setMaxTowns(int maxTowns) {
-        this.maxTowns = maxTowns;
-    }
-
-    public boolean isOpen() {
-        return isOpen;
-    }
-
-    public void setOpen(boolean open) {
-        isOpen = open;
-    }
-
-    public boolean isPublic() {
-        return isPublic;
-    }
-
-    public void setPublic(boolean aPublic) {
-        isPublic = aPublic;
-    }
-
-    public String getBoard() {
-        return board;
-    }
-
-    public void setBoard(String board) {
-        this.board = board;
-    }
-
-    public Set<String> getPermissions() {
-        return permissions;
-    }
-
-    public void setPermissions(Set<String> permissions) {
-        this.permissions = permissions;
-    }
-
-    public Map<String, Boolean> getFlags() {
-        return flags;
-    }
-
-    public void setFlags(Map<String, Boolean> flags) {
-        this.flags = flags;
-    }
-
-    public Map<String, Object> getMetadata() {
-        return metadata;
-    }
-
-    public void setMetadata(Map<String, Object> metadata) {
-        this.metadata = metadata;
-    }
-
-    public Set<UUID> getTowns() {
-        return towns;
-    }
-
+    public Set<UUID> getTowns() { return towns; }
     public void setTowns(Set<UUID> towns) {
         this.towns = towns;
+        // Ensure capital town is included
+        if (capitalTownUuid != null && !this.towns.contains(capitalTownUuid)) {
+            this.towns.add(capitalTownUuid);
+        }
     }
 
     // Utility methods
@@ -177,7 +125,18 @@ public class Nation {
     }
 
     public void removeTown(UUID townUuid) {
-        towns.remove(townUuid);
+        // Don't remove capital town unless we're setting a new one
+        if (!townUuid.equals(capitalTownUuid)) {
+            towns.remove(townUuid);
+        } else if (towns.size() > 1) {
+            // If removing capital and there are other towns, don't remove yet
+            // The caller should set a new capital first
+            return;
+        } else {
+            // Last town, can remove
+            towns.remove(townUuid);
+            capitalTownUuid = null;
+        }
     }
 
     public int getTownCount() {
@@ -194,5 +153,57 @@ public class Nation {
 
     public void setFlag(String flag, boolean value) {
         flags.put(flag, value);
+    }
+
+    public boolean hasCapitalChunk() {
+        return capitalChunkUuid != null;
+    }
+
+    public boolean isCapitalTown(UUID townUuid) {
+        return capitalTownUuid != null && capitalTownUuid.equals(townUuid);
+    }
+
+    // Additional methods for better integration
+    public boolean hasPermission(String permission) {
+        return permissions.contains(permission);
+    }
+
+    public void addPermission(String permission) {
+        permissions.add(permission);
+    }
+
+    public void removePermission(String permission) {
+        permissions.remove(permission);
+    }
+
+    public boolean isEmpty() {
+        return towns.isEmpty();
+    }
+
+    public List<UUID> getTownsList() {
+        return new ArrayList<>(towns);
+    }
+
+    @Override
+    public String toString() {
+        return "Nation{" +
+                "name='" + name + '\'' +
+                ", king=" + kingUuid +
+                ", towns=" + towns.size() +
+                ", capital=" + capitalTownUuid +
+                '}';
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Nation nation = (Nation) o;
+        return Objects.equals(uuid, nation.uuid);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(uuid);
     }
 }

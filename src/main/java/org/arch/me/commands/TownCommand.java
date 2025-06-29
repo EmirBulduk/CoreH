@@ -44,8 +44,6 @@ public class TownCommand implements CommandExecutor, TabCompleter {
             case "leave" -> handleLeave(player, args);
             case "invite" -> handleInvite(player, args);
             case "kick" -> handleKick(player, args);
-            case "claim" -> handleClaim(player, args);
-            case "unclaim" -> handleUnclaim(player, args);
             case "spawn" -> handleSpawn(player, args);
             case "setspawn" -> handleSetSpawn(player, args);
             case "deposit" -> handleDeposit(player, args);
@@ -203,7 +201,8 @@ public class TownCommand implements CommandExecutor, TabCompleter {
                 });
     }
 
-    private void handleClaim(Player player, String[] args) {
+    //DEPRECATED:CLAIMINGAND UNCLAIM IS IN PLOT CLAIM
+    /*private void handleClaim(Player player, String[] args) {
         TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(player.getUniqueId());
         if (townyPlayer == null || !townyPlayer.hasTown()) {
             player.sendMessage(plugin.getConfigManager().getMessage("town.not-in-town"));
@@ -235,7 +234,7 @@ public class TownCommand implements CommandExecutor, TabCompleter {
                         player.sendMessage("§cFailed to unclaim chunk.");
                     }
                 });
-    }
+    }*/
 
     private void handleSpawn(Player player, String[] args) {
         String townName = null;

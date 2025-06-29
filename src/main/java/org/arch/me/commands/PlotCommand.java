@@ -390,7 +390,7 @@ public class PlotCommand implements CommandExecutor, TabCompleter {
             String plotName = (String) chunk.getMetadata().getOrDefault("name", "Unnamed");
 
             player.sendMessage("§e" + (i + 1) + ". §f" + plotName + " §7(" + chunk.getPlotType() +
-                    ") in " + townName + " at " + chunk.getWorld() + " " + chunk.getX() + "," + chunk.getZ());
+                    ") in " + townName + " at " + chunk.getWorldName() + " " + chunk.getX() + "," + chunk.getZ());
         }
 
         if (ownedPlots.size() > 10) {
@@ -494,7 +494,7 @@ public class PlotCommand implements CommandExecutor, TabCompleter {
         player.sendMessage("§eTown: §f" + townName);
         player.sendMessage("§eType: §f" + chunk.getPlotType());
         player.sendMessage("§eOwner: §f" + (chunk.hasOwner() ? getOwnerName(chunk) : "Town"));
-        player.sendMessage("§eLocation: §f" + chunk.getWorld() + " " + chunk.getX() + "," + chunk.getZ());
+        player.sendMessage("§eLocation: §f" + chunk.getWorldName() + " " + chunk.getX() + "," + chunk.getZ());
 
         if (chunk.isForSale()) {
             player.sendMessage("§ePrice: §f" + plugin.getEconomyManager().format(chunk.getPlotPrice()));

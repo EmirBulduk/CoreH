@@ -22,8 +22,10 @@ public class ClaimedChunk {
     private Set<String> permissions;
     private Map<String, Boolean> flags;
     private Map<String, Object> metadata;
+    private UUID uuid;
 
     public ClaimedChunk(String world, int x, int z, UUID townUuid) {
+        this.uuid = UUID.randomUUID();
         this.world = world;
         this.x = x;
         this.z = z;
@@ -42,7 +44,6 @@ public class ClaimedChunk {
         flags.put("itemuse", false);
     }
 
-    // Getters and setters
     public long getId() {
         return id;
     }
@@ -50,8 +51,25 @@ public class ClaimedChunk {
     public void setId(long id) {
         this.id = id;
     }
+    // Getter/setter metodları ekleyin:
+    public UUID getUuid() {
+        return uuid;
+    }
 
-    public String getWorld() {
+    public void setUuid(UUID uuid) {
+        this.uuid = uuid;
+    }
+
+    // getChunkX ve getChunkZ metodları ekleyin:
+    public int getChunkX() {
+        return x;
+    }
+
+    public int getChunkZ() {
+        return z;
+    }
+
+    public String getWorldName() {
         return world;
     }
 
