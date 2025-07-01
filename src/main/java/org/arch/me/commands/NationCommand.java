@@ -5,6 +5,7 @@ import org.arch.me.models.ClaimedChunk;
 import org.arch.me.models.Nation;
 import org.arch.me.models.Town;
 import org.arch.me.models.TownyPlayer;
+import org.arch.me.util.NameValidator;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -55,6 +56,7 @@ public class NationCommand implements CommandExecutor, TabCompleter {
             case "king" -> handleSetKing(player, args);
             case "capital" -> handleSetCapital(player, args);
             case "capitalchunk" -> handleSetCapitalChunk(player, args);
+            case "rank" -> handleRank(player, args);
             default -> showHelp(player);
         }
 
@@ -77,54 +79,6 @@ public class NationCommand implements CommandExecutor, TabCompleter {
         displayNationInfo(player, nation);
     }
 
-    private void handleSetCapitalChunk(Player player, String[] args) {
-        TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(player.getUniqueId());
-        if (townyPlayer == null || !townyPlayer.hasNation()) {
-            player.sendMessage(plugin.getConfigManager().getMessage("nation.not-in-nation"));
-            return;
-        }
-
-        Nation nation = plugin.getNationManager().getNation(townyPlayer.getNationUuid());
-        if (nation == null || !nation.isKing(player.getUniqueId())) {
-            player.sendMessage("§cYou must be the king to set the capital chunk!");
-            return;
-        }
-
-        // Get current chunk
-        org.bukkit.Chunk chunk = player.getLocation().getChunk();
-
-        // Check if chunk is claimed by capital town
-        Town capitalTown = plugin.getTownManager().getTown(nation.getCapitalTownUuid());
-        if (capitalTown == null) {
-            player.sendMessage("§cCapital town not found!");
-            return;
-        }
-
-        boolean isCapitalChunk = false;
-        UUID chunkUuid = null;
-
-        for (ClaimedChunk claimedChunk : capitalTown.getClaimedChunks()) {
-            if (claimedChunk.getChunkX() == chunk.getX() &&
-                    claimedChunk.getChunkZ() == chunk.getZ() &&
-                    claimedChunk.getWorldName().equals(chunk.getWorld().getName())) {
-                isCapitalChunk = true;
-                chunkUuid = claimedChunk.getUuid();
-                break;
-            }
-        }
-
-        if (!isCapitalChunk) {
-            player.sendMessage("§cThis chunk is not claimed by your capital town!");
-            return;
-        }
-
-        nation.setCapitalChunkUuid(chunkUuid);
-        plugin.getNationManager().saveNation(nation);
-
-        player.sendMessage("§aCapital chunk has been set at " + chunk.getX() + ", " + chunk.getZ() + "!");
-        player.sendMessage("§eThis chunk will be used for war capitulation mechanics.");
-    }
-
     private void handleCreate(Player player, String[] args) {
         if (args.length < 2) {
             player.sendMessage("§cUsage: /nation create <name>");
@@ -132,29 +86,27 @@ public class NationCommand implements CommandExecutor, TabCompleter {
         }
 
         String nationName = args[1];
-        TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(player.getUniqueId());
 
-        // Check if player has a town
+        // Validate nation name
+        if (!NameValidator.isValidName(nationName)) {
+            player.sendMessage("§cInvalid nation name: " + NameValidator.getValidationError(nationName));
+            return;
+        }
+
+        TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(player.getUniqueId());
         if (townyPlayer == null || !townyPlayer.hasTown()) {
             player.sendMessage("§cYou must be in a town to create a nation!");
             return;
         }
 
         Town playerTown = plugin.getTownManager().getTown(townyPlayer.getTownUuid());
-        if (playerTown == null) {
-            player.sendMessage("§cTown not found!");
+        if (playerTown == null || !playerTown.isMayor(player.getUniqueId())) {
+            player.sendMessage("§cYou must be the mayor of a town to create a nation!");
             return;
         }
 
-        // Check if player is mayor
-        if (!playerTown.isMayor(player.getUniqueId())) {
-            player.sendMessage("§cYou must be a mayor to create a nation!");
-            return;
-        }
-
-        // Check if town is already in a nation
         if (playerTown.hasNation()) {
-            player.sendMessage(plugin.getConfigManager().getMessage("nation.already-in-nation"));
+            player.sendMessage("§cYour town is already part of a nation!");
             return;
         }
 
@@ -177,6 +129,10 @@ public class NationCommand implements CommandExecutor, TabCompleter {
         plugin.getNationManager().createNation(nationName, player.getUniqueId(), playerTown.getUuid())
                 .thenAccept(nation -> {
                     if (nation != null) {
+                        // Set default rank for the king
+                        plugin.getRankManager().setPlayerRank(player.getUniqueId(),
+                            plugin.getRankManager().getRank("minister").getUuid());
+
                         player.sendMessage(plugin.getConfigManager().getMessage("nation.created", nationName));
                         player.sendMessage("§aDeducted " + plugin.getEconomyManager().format(cost) + " for nation creation.");
                     } else {
@@ -216,42 +172,55 @@ public class NationCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
-        String townName = args[1];
         TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(player.getUniqueId());
-
         if (townyPlayer == null || !townyPlayer.hasNation()) {
             player.sendMessage(plugin.getConfigManager().getMessage("nation.not-in-nation"));
             return;
         }
 
         Nation nation = plugin.getNationManager().getNation(townyPlayer.getNationUuid());
-        if (nation == null || !nation.isKing(player.getUniqueId())) {
-            player.sendMessage("§cYou must be the king to invite towns!");
+        if (nation == null) {
+            player.sendMessage(plugin.getConfigManager().getMessage("general.error"));
             return;
         }
 
-        Town targetTown = plugin.getTownManager().getTown(townName);
-        if (targetTown == null) {
-            player.sendMessage("§cTown not found.");
+        // Check permissions - king or players with nation.invite permission
+        if (!nation.isKing(player.getUniqueId()) &&
+            !plugin.getRankManager().playerHasPermission(player.getUniqueId(), "towny.nation.invite")) {
+            player.sendMessage("§cYou don't have permission to invite towns to the nation!");
             return;
         }
 
-        if (targetTown.hasNation()) {
-            player.sendMessage("§cThat town is already in a nation.");
+        String townName = args[1];
+        Town town = plugin.getTownManager().getTown(townName);
+
+        if (town == null) {
+            player.sendMessage("§cTown not found: " + townName);
             return;
         }
 
-        plugin.getNationManager().addTownToNation(nation.getUuid(), targetTown.getUuid())
+        if (town.hasNation()) {
+            player.sendMessage("§cThat town is already part of a nation!");
+            return;
+        }
+
+        if (!nation.canAddTown()) {
+            player.sendMessage("§cNation has reached maximum town limit!");
+            return;
+        }
+
+        plugin.getNationManager().addTownToNation(nation.getUuid(), town.getUuid())
                 .thenAccept(success -> {
                     if (success) {
-                        player.sendMessage("§a" + targetTown.getName() + " has been invited to the nation.");
+                        player.sendMessage("§a" + town.getName() + " has been invited to join the nation!");
+
                         // Notify town mayor
-                        Player mayor = plugin.getServer().getPlayer(targetTown.getMayorUuid());
+                        Player mayor = plugin.getServer().getPlayer(town.getMayorUuid());
                         if (mayor != null) {
-                            mayor.sendMessage("§aYour town has been invited to join " + nation.getName() + "!");
+                            mayor.sendMessage("§aYour town " + town.getName() + " has been invited to join the nation " + nation.getName() + "!");
                         }
                     } else {
-                        player.sendMessage("§cFailed to invite town.");
+                        player.sendMessage("§cFailed to invite town to nation.");
                     }
                 });
     }
@@ -262,9 +231,132 @@ public class NationCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
-        String townName = args[1];
         TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(player.getUniqueId());
+        if (townyPlayer == null || !townyPlayer.hasNation()) {
+            player.sendMessage(plugin.getConfigManager().getMessage("nation.not-in-nation"));
+            return;
+        }
 
+        Nation nation = plugin.getNationManager().getNation(townyPlayer.getNationUuid());
+        if (nation == null) {
+            player.sendMessage(plugin.getConfigManager().getMessage("general.error"));
+            return;
+        }
+
+        // Check permissions - king or players with nation.kick permission
+        if (!nation.isKing(player.getUniqueId()) &&
+            !plugin.getRankManager().playerHasPermission(player.getUniqueId(), "towny.nation.kick")) {
+            player.sendMessage("§cYou don't have permission to kick towns from the nation!");
+            return;
+        }
+
+        String townName = args[1];
+        Town town = plugin.getTownManager().getTown(townName);
+
+        if (town == null) {
+            player.sendMessage("§cTown not found: " + townName);
+            return;
+        }
+
+        if (!nation.hasTown(town.getUuid())) {
+            player.sendMessage("§cThat town is not part of this nation!");
+            return;
+        }
+
+        if (nation.isCapitalTown(town.getUuid())) {
+            player.sendMessage("§cCannot kick the capital town! Set a new capital first.");
+            return;
+        }
+
+        plugin.getNationManager().removeTownFromNation(nation.getUuid(), town.getUuid())
+                .thenAccept(success -> {
+                    if (success) {
+                        player.sendMessage("§a" + town.getName() + " has been kicked from the nation!");
+
+                        // Notify town mayor
+                        Player mayor = plugin.getServer().getPlayer(town.getMayorUuid());
+                        if (mayor != null) {
+                            mayor.sendMessage("§cYour town " + town.getName() + " has been kicked from the nation " + nation.getName() + "!");
+                        }
+                    } else {
+                        player.sendMessage("§cFailed to kick town from nation.");
+                    }
+                });
+    }
+
+    private void handleRank(Player player, String[] args) {
+        if (args.length < 3) {
+            player.sendMessage("§cUsage: /nation rank set <player> <rank>");
+            player.sendMessage("§cAvailable ranks: citizen, advisor, minister");
+            return;
+        }
+
+        TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(player.getUniqueId());
+        if (townyPlayer == null || !townyPlayer.hasNation()) {
+            player.sendMessage(plugin.getConfigManager().getMessage("nation.not-in-nation"));
+            return;
+        }
+
+        Nation nation = plugin.getNationManager().getNation(townyPlayer.getNationUuid());
+        if (nation == null) {
+            player.sendMessage(plugin.getConfigManager().getMessage("general.error"));
+            return;
+        }
+
+        // Check permissions - king or players with nation.rank permission
+        if (!nation.isKing(player.getUniqueId()) &&
+            !plugin.getRankManager().playerHasPermission(player.getUniqueId(), "towny.nation.rank")) {
+            player.sendMessage("§cYou don't have permission to manage nation ranks!");
+            return;
+        }
+
+        String action = args[1].toLowerCase();
+        String targetPlayerName = args[2];
+
+        Player targetPlayer = plugin.getServer().getPlayer(targetPlayerName);
+        if (targetPlayer == null) {
+            player.sendMessage("§cPlayer not found or not online!");
+            return;
+        }
+
+        TownyPlayer targetTownyPlayer = plugin.getPlayerManager().getPlayer(targetPlayer.getUniqueId());
+        if (targetTownyPlayer == null || !targetTownyPlayer.hasNation() ||
+            !targetTownyPlayer.getNationUuid().equals(nation.getUuid())) {
+            player.sendMessage("§cPlayer must be a citizen of this nation!");
+            return;
+        }
+
+        switch (action) {
+            case "set" -> {
+                if (args.length < 4) {
+                    player.sendMessage("§cUsage: /nation rank set <player> <rank>");
+                    return;
+                }
+
+                String rankName = args[3];
+                var rank = plugin.getRankManager().getRank(rankName);
+
+                if (rank == null || !rank.isNationRank()) {
+                    player.sendMessage("§cInvalid nation rank: " + rankName);
+                    return;
+                }
+
+                plugin.getRankManager().setPlayerRank(targetPlayer.getUniqueId(), rank.getUuid())
+                    .thenAccept(success -> {
+                        if (success) {
+                            player.sendMessage("§aSet " + targetPlayer.getName() + "'s nation rank to " + rank.getDisplayName());
+                            targetPlayer.sendMessage("§aYour nation rank has been set to " + rank.getDisplayName());
+                        } else {
+                            player.sendMessage("§cFailed to set rank!");
+                        }
+                    });
+            }
+            default -> player.sendMessage("§cInvalid action. Use: set");
+        }
+    }
+
+    private void handleSetCapitalChunk(Player player, String[] args) {
+        TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(player.getUniqueId());
         if (townyPlayer == null || !townyPlayer.hasNation()) {
             player.sendMessage(plugin.getConfigManager().getMessage("nation.not-in-nation"));
             return;
@@ -272,118 +364,30 @@ public class NationCommand implements CommandExecutor, TabCompleter {
 
         Nation nation = plugin.getNationManager().getNation(townyPlayer.getNationUuid());
         if (nation == null || !nation.isKing(player.getUniqueId())) {
-            player.sendMessage("§cYou must be the king to kick towns!");
+            player.sendMessage("§cYou must be the king to set the capital chunk!");
             return;
         }
 
-        Town targetTown = plugin.getTownManager().getTown(townName);
-        if (targetTown == null) {
-            player.sendMessage("§cTown not found.");
+        // Get current chunk and find corresponding claimed chunk UUID
+        ClaimedChunk claimedChunk = plugin.getChunkManager().getClaimedChunk(player.getLocation());
+        if (claimedChunk == null) {
+            player.sendMessage("§cYou must be standing in a claimed chunk!");
             return;
         }
 
-        if (!nation.hasTown(targetTown.getUuid())) {
-            player.sendMessage("§cThat town is not in your nation.");
+        // Check if chunk belongs to capital town
+        Town capitalTown = plugin.getTownManager().getTown(nation.getCapitalTownUuid());
+        if (capitalTown == null || !claimedChunk.getTownUuid().equals(capitalTown.getUuid())) {
+            player.sendMessage("§cCapital chunk must be in the capital town!");
             return;
         }
 
-        if (nation.getCapitalUuid().equals(targetTown.getUuid())) {
-            player.sendMessage("§cYou cannot kick the capital town!");
-            return;
-        }
-
-        plugin.getNationManager().removeTownFromNation(nation.getUuid(), targetTown.getUuid())
+        plugin.getNationManager().setCapitalChunk(nation.getUuid(), player.getUniqueId(), claimedChunk.getUuid())
                 .thenAccept(success -> {
                     if (success) {
-                        player.sendMessage("§a" + targetTown.getName() + " has been kicked from the nation.");
-                        // Notify town mayor
-                        Player mayor = plugin.getServer().getPlayer(targetTown.getMayorUuid());
-                        if (mayor != null) {
-                            mayor.sendMessage("§cYour town has been kicked from " + nation.getName() + "!");
-                        }
+                        player.sendMessage("§aNation capital chunk has been set!");
                     } else {
-                        player.sendMessage("§cFailed to kick town.");
-                    }
-                });
-    }
-
-    private void handleJoin(Player player, String[] args) {
-        if (args.length < 2) {
-            player.sendMessage("§cUsage: /nation join <nation>");
-            return;
-        }
-
-        String nationName = args[1];
-        TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(player.getUniqueId());
-
-        if (townyPlayer == null || !townyPlayer.hasTown()) {
-            player.sendMessage("§cYou must be in a town to join a nation!");
-            return;
-        }
-
-        Town playerTown = plugin.getTownManager().getTown(townyPlayer.getTownUuid());
-        if (playerTown == null || !playerTown.isMayor(player.getUniqueId())) {
-            player.sendMessage("§cYou must be a mayor to join a nation!");
-            return;
-        }
-
-        if (playerTown.hasNation()) {
-            player.sendMessage(plugin.getConfigManager().getMessage("nation.already-in-nation"));
-            return;
-        }
-
-        Nation targetNation = plugin.getNationManager().getNation(nationName);
-        if (targetNation == null) {
-            player.sendMessage("§cNation not found.");
-            return;
-        }
-
-        if (!targetNation.isOpen()) {
-            player.sendMessage("§cThat nation is not open for new towns.");
-            return;
-        }
-
-        plugin.getNationManager().addTownToNation(targetNation.getUuid(), playerTown.getUuid())
-                .thenAccept(success -> {
-                    if (success) {
-                        player.sendMessage(plugin.getConfigManager().getMessage("nation.joined", playerTown.getName(), targetNation.getName()));
-                    } else {
-                        player.sendMessage("§cFailed to join nation.");
-                    }
-                });
-    }
-
-    private void handleLeave(Player player, String[] args) {
-        TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(player.getUniqueId());
-
-        if (townyPlayer == null || !townyPlayer.hasTown()) {
-            player.sendMessage("§cYou must be in a town!");
-            return;
-        }
-
-        Town playerTown = plugin.getTownManager().getTown(townyPlayer.getTownUuid());
-        if (playerTown == null || !playerTown.isMayor(player.getUniqueId())) {
-            player.sendMessage("§cYou must be a mayor to leave a nation!");
-            return;
-        }
-
-        if (!playerTown.hasNation()) {
-            player.sendMessage(plugin.getConfigManager().getMessage("nation.not-in-nation"));
-            return;
-        }
-
-        Nation nation = plugin.getNationManager().getNation(playerTown.getNationUuid());
-        if (nation == null) {
-            player.sendMessage(plugin.getConfigManager().getMessage("general.error"));
-            return;
-        }
-
-        plugin.getNationManager().removeTownFromNation(nation.getUuid(), playerTown.getUuid())
-                .thenAccept(success -> {
-                    if (success) {
-                        player.sendMessage(plugin.getConfigManager().getMessage("nation.left", playerTown.getName(), nation.getName()));
-                    } else {
-                        player.sendMessage("§cFailed to leave nation.");
+                        player.sendMessage("§cFailed to set capital chunk. Check nation funds.");
                     }
                 });
     }
@@ -687,46 +691,23 @@ public class NationCommand implements CommandExecutor, TabCompleter {
     }
 
     private void displayNationInfo(Player player, Nation nation) {
-        player.sendMessage("§6=== " + nation.getName() + " ===");
+        player.sendMessage("§6=== Nation Info: " + nation.getName() + " ===");
         player.sendMessage("§eKing: §f" + getKingName(nation));
-        player.sendMessage("§eCapital: §f" + getCapitalName(nation));
-        player.sendMessage("§eTowns (" + nation.getTownCount() + "): §f" + getTownNames(nation));
+        player.sendMessage("§eTowns: §f" + nation.getTownCount() + "/" + nation.getMaxTowns());
         player.sendMessage("§eBalance: §f" + plugin.getEconomyManager().format(nation.getBalance()));
-        player.sendMessage("§eTax Rate: §f" + nation.getTaxRate() + "%");
         player.sendMessage("§eOpen: §f" + (nation.isOpen() ? "Yes" : "No"));
         player.sendMessage("§ePublic: §f" + (nation.isPublic() ? "Yes" : "No"));
+
+        if (nation.getCapitalTownUuid() != null) {
+            Town capital = plugin.getTownManager().getTown(nation.getCapitalTownUuid());
+            player.sendMessage("§eCapital: §f" + (capital != null ? capital.getName() : "Unknown"));
+        }
 
         if (nation.getBoard() != null && !nation.getBoard().isEmpty()) {
             player.sendMessage("§eBoard: §f" + nation.getBoard());
         }
-
-        // Show war status if at war
-        if (plugin.getWarManager().isNationAtWar(nation.getUuid())) {
-            player.sendMessage("§c⚔ AT WAR! Use /war status for details.");
-        }
     }
 
-    private void showHelp(Player player) {
-        player.sendMessage("§6=== Nation Commands ===");
-        player.sendMessage("§e/nation §7- Show nation info");
-        player.sendMessage("§e/nation create <name> §7- Create a new nation");
-        player.sendMessage("§e/nation delete §7- Delete your nation");
-        player.sendMessage("§e/nation invite <town> §7- Invite a town");
-        player.sendMessage("§e/nation kick <town> §7- Kick a town");
-        player.sendMessage("§e/nation join <nation> §7- Join a nation");
-        player.sendMessage("§e/nation leave §7- Leave your nation");
-        player.sendMessage("§e/nation deposit <amount> §7- Deposit to nation bank");
-        player.sendMessage("§e/nation withdraw <amount> §7- Withdraw from nation bank");
-        player.sendMessage("§e/nation set <property> <value> §7- Set nation property");
-        player.sendMessage("§e/nation toggle <flag> §7- Toggle nation flag");
-        player.sendMessage("§e/nation info [nation] §7- Show nation information");
-        player.sendMessage("§e/nation list [page] §7- List all nations");
-        player.sendMessage("§e/nation king <player> §7- Transfer leadership");
-        player.sendMessage("§e/nation capital <town> §7- Set capital town");
-        player.sendMessage("§e/nation capitalchunk §7- Set capital chunk (for wars)");
-    }
-
-    // Utility methods
     private String getKingName(Nation nation) {
         Player king = plugin.getServer().getPlayer(nation.getKingUuid());
         if (king != null) {
@@ -769,9 +750,9 @@ public class NationCommand implements CommandExecutor, TabCompleter {
 
         if (args.length == 1) {
             List<String> subCommands = Arrays.asList(
-                    "create", "delete", "invite", "kick", "join", "leave",
-                    "deposit", "withdraw", "set", "toggle", "info", "list",
-                    "king", "capital"
+                    "create", "delete", "invite", "kick", "join", "leave", "rank",
+                    "set", "toggle", "deposit", "withdraw", "info", "list",
+                    "king", "capital", "capitalchunk"
             );
 
             for (String sub : subCommands) {
@@ -790,47 +771,39 @@ public class NationCommand implements CommandExecutor, TabCompleter {
                         }
                     }
                 }
-                case "join", "info" -> {
-                    for (Nation nation : plugin.getNationManager().getAllNations()) {
-                        if (nation.getName().toLowerCase().startsWith(args[1].toLowerCase())) {
-                            completions.add(nation.getName());
+                case "rank" -> {
+                    List<String> rankActions = Arrays.asList("set");
+                    for (String action : rankActions) {
+                        if (action.toLowerCase().startsWith(args[1].toLowerCase())) {
+                            completions.add(action);
                         }
                     }
                 }
-                case "king" -> {
-                    for (Player player : plugin.getServer().getOnlinePlayers()) {
-                        if (player.getName().toLowerCase().startsWith(args[1].toLowerCase())) {
-                            completions.add(player.getName());
-                        }
-                    }
-                }
-                case "capital" -> {
-                    for (Town town : plugin.getTownManager().getAllTowns()) {
-                        if (town.getName().toLowerCase().startsWith(args[1].toLowerCase())) {
-                            completions.add(town.getName());
-                        }
-                    }
-                }
-                case "set" -> {
-                    List<String> properties = Arrays.asList("name", "board", "tax");
-                    for (String prop : properties) {
-                        if (prop.toLowerCase().startsWith(args[1].toLowerCase())) {
-                            completions.add(prop);
-                        }
-                    }
-                }
-                case "toggle" -> {
-                    List<String> flags = Arrays.asList("open", "public");
-                    for (String flag : flags) {
-                        if (flag.toLowerCase().startsWith(args[1].toLowerCase())) {
-                            completions.add(flag);
-                        }
-                    }
+            }
+        } else if (args.length == 4 && args[0].equalsIgnoreCase("rank") && args[1].equalsIgnoreCase("set")) {
+            // Nation ranks
+            List<String> ranks = Arrays.asList("citizen", "advisor", "minister");
+            for (String rank : ranks) {
+                if (rank.toLowerCase().startsWith(args[3].toLowerCase())) {
+                    completions.add(rank);
                 }
             }
         }
 
         return completions;
+    }
+
+    private void showHelp(Player player) {
+        player.sendMessage("§6=== Nation Commands ===");
+        player.sendMessage("§e/nation §7- Show nation info");
+        player.sendMessage("§e/nation create <name> §7- Create a new nation");
+        player.sendMessage("§e/nation delete §7- Delete your nation");
+        player.sendMessage("§e/nation invite <town> §7- Invite a town to join");
+        player.sendMessage("§e/nation kick <town> §7- Kick a town from nation");
+        player.sendMessage("§e/nation rank set <player> <rank> §7- Set player's nation rank");
+        player.sendMessage("§e/nation capitalchunk §7- Set capital chunk (expensive)");
+        player.sendMessage("§e/nation info [nation] §7- Show nation information");
+        player.sendMessage("§e/nation list [page] §7- List all nations");
     }
 }
 

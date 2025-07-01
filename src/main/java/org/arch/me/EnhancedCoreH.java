@@ -29,6 +29,7 @@ public final class EnhancedCoreH extends JavaPlugin {
     private ChunkManager chunkManager;
     private RankManager rankManager;
     private WarManager warManager;
+    private BufferZoneManager bufferZoneManager;
 
     @Override
     public void onEnable() {
@@ -63,6 +64,7 @@ public final class EnhancedCoreH extends JavaPlugin {
         chunkManager = new ChunkManager(this);
         nationManager = new NationManager(this);
         warManager = new WarManager(this);
+        bufferZoneManager = new BufferZoneManager(this);
 
         registerCommands();
 
@@ -75,6 +77,10 @@ public final class EnhancedCoreH extends JavaPlugin {
     public void onDisable() {
         if (warManager != null) {
             warManager.shutdown();
+        }
+
+        if (bufferZoneManager != null) {
+            bufferZoneManager.shutdown();
         }
 
         if (databaseManager != null) {
@@ -167,6 +173,7 @@ public final class EnhancedCoreH extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new TownListener(this), this);
         getServer().getPluginManager().registerEvents(new EconomyListener(this), this);
         getServer().getPluginManager().registerEvents(new WarListener(this), this);
+        getServer().getPluginManager().registerEvents(new BufferZoneListener(this), this);
     }
 
     // Getters
@@ -212,5 +219,9 @@ public final class EnhancedCoreH extends JavaPlugin {
 
     public WarManager getWarManager() {
         return warManager;
+    }
+
+    public BufferZoneManager getBufferZoneManager() {
+        return bufferZoneManager;
     }
 }

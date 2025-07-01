@@ -162,9 +162,36 @@ public class TownManager {
                     return null;
                 }
 
+                // Check if location is in buffer zone
+                if (plugin.getBufferZoneManager().isInBufferZone(spawn)) {
+                    plugin.getLogger().info("Town creation failed: Location is in buffer zone");
+                    return null;
+                }
+
+                // Check if world allows town creation
+                if (!plugin.getConfigManager().getEnabledWorlds().contains(spawn.getWorld().getName())) {
+                    plugin.getLogger().info("Town creation failed: World " + spawn.getWorld().getName() + " not enabled for towns");
+                    return null;
+                }
+
+                if (plugin.getConfigManager().getDisabledClaimingWorlds().contains(spawn.getWorld().getName())) {
+                    plugin.getLogger().info("Town creation failed: World " + spawn.getWorld().getName() + " disabled for claiming");
+                    return null;
+                }
+
+                // Check if chunk is already claimed
+                if (plugin.getChunkManager().isChunkClaimed(spawn)) {
+                    plugin.getLogger().info("Town creation failed: Chunk already claimed");
+                    return null;
+                }
+
                 // Check economy requirements
-                BigDecimal cost = BigDecimal.valueOf(plugin.getConfigManager().getEconomyValue("town-creation-cost"));
-                if (!plugin.getEconomyManager().hasPlayerBalance(mayorUuid, cost)) {
+                BigDecimal townCreationCost = BigDecimal.valueOf(plugin.getConfigManager().getEconomyValue("town-creation-cost"));
+                BigDecimal chunkClaimCost = BigDecimal.valueOf(plugin.getConfigManager().getEconomyValue("chunk-claim-cost"));
+                BigDecimal totalCost = townCreationCost.add(chunkClaimCost);
+
+                if (!plugin.getEconomyManager().hasPlayerBalance(mayorUuid, totalCost)) {
+                    plugin.getLogger().info("Town creation failed: Insufficient funds. Required: " + totalCost);
                     return null;
                 }
 
@@ -173,10 +200,10 @@ public class TownManager {
                 Town town = new Town(townUuid, name, mayorUuid);
                 town.setSpawn(spawn);
 
-                // Withdraw money
-                plugin.getEconomyManager().withdrawPlayer(mayorUuid, cost);
+                // Withdraw money for both town creation and initial chunk claim
+                plugin.getEconomyManager().withdrawPlayer(mayorUuid, totalCost);
 
-                // Save to database
+                // Save town to database first
                 saveTown(town);
 
                 // Update player
@@ -190,7 +217,14 @@ public class TownManager {
                 townCache.put(townUuid, town);
                 townNameCache.put(name.toLowerCase(), townUuid);
 
-                plugin.getLogger().info("Created town: " + name + " with mayor: " + mayorUuid);
+                // Now claim the initial chunk
+                boolean chunkClaimed = plugin.getChunkManager().claimChunk(townUuid, spawn, mayorUuid).join();
+                if (!chunkClaimed) {
+                    plugin.getLogger().warning("Town created but failed to claim initial chunk for: " + name);
+                    // Don't fail the town creation if chunk claiming fails
+                }
+
+                plugin.getLogger().info("Created town: " + name + " with mayor: " + mayorUuid + " and claimed initial chunk");
                 return town;
 
             } catch (Exception e) {

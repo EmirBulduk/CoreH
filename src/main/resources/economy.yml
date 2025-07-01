@@ -12,7 +12,7 @@ costs:
   town-creation: 1000.0
   nation-creation: 5000.0
   chunk-claim: 50.0
-  plot-claim: 25.0
+  plot-claim: 100.0
 
 # Daily upkeep costs
 upkeep:

@@ -87,6 +87,12 @@ public class PlotCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
+        // Check if location is in buffer zone
+        if (plugin.getBufferZoneManager().isInBufferZone(player.getLocation())) {
+            player.sendMessage("§cYou cannot claim chunks in a buffer zone!");
+            return;
+        }
+
         // Check if chunk is already claimed
         if (plugin.getChunkManager().isChunkClaimed(player.getLocation())) {
             player.sendMessage("§cThis chunk is already claimed!");

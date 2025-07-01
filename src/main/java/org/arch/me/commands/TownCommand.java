@@ -1,8 +1,10 @@
 package org.arch.me.commands;
 
 import org.arch.me.EnhancedCoreH;
+import org.arch.me.models.ClaimedChunk;
 import org.arch.me.models.Town;
 import org.arch.me.models.TownyPlayer;
+import org.arch.me.util.NameValidator;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -52,6 +54,7 @@ public class TownCommand implements CommandExecutor, TabCompleter {
             case "toggle" -> handleToggle(player, args);
             case "info" -> handleInfo(player, args);
             case "list" -> handleList(player, args);
+            case "rank" -> handleRank(player, args);
             default -> showHelp(player);
         }
 
@@ -90,6 +93,13 @@ public class TownCommand implements CommandExecutor, TabCompleter {
         }
 
         String townName = args[1];
+
+        // Validate town name
+        if (!NameValidator.isValidName(townName)) {
+            player.sendMessage("§cInvalid town name: " + NameValidator.getValidationError(townName));
+            return;
+        }
+
         TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(player.getUniqueId());
 
         if (townyPlayer != null && townyPlayer.hasTown()) {
@@ -97,31 +107,50 @@ public class TownCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
-        BigDecimal cost = BigDecimal.valueOf(plugin.getConfigManager().getEconomyValue("town-creation-cost"));
-
-        // Use Vault API directly for money check and withdrawal
-        if (!plugin.getEconomyManager().hasBalance(player, cost.doubleValue())) {
-            player.sendMessage("§cYou don't have enough money! Required: " +
-                plugin.getEconomyManager().format(cost) +
-                " | You have: " + plugin.getEconomyManager().format(BigDecimal.valueOf(plugin.getEconomyManager().getBalance(player))));
+        // Check if location is in buffer zone
+        if (plugin.getBufferZoneManager().isInBufferZone(player.getLocation())) {
+            player.sendMessage("§cYou cannot create a town in a buffer zone!");
             return;
         }
 
-        // Withdraw money first
-        if (!plugin.getEconomyManager().withdrawPlayer(player, cost.doubleValue()).transactionSuccess()) {
-            player.sendMessage("§cFailed to withdraw money for town creation!");
+        // Check if chunk is already claimed
+        if (plugin.getChunkManager().isChunkClaimed(player.getLocation())) {
+            player.sendMessage("§cThis chunk is already claimed! You cannot create a town here.");
+            return;
+        }
+
+        BigDecimal townCreationCost = BigDecimal.valueOf(plugin.getConfigManager().getEconomyValue("town-creation-cost"));
+        BigDecimal chunkClaimCost = BigDecimal.valueOf(plugin.getConfigManager().getEconomyValue("chunk-claim-cost"));
+        BigDecimal totalCost = townCreationCost.add(chunkClaimCost);
+
+        // Use Vault API directly for money check and withdrawal
+        if (!plugin.getEconomyManager().hasBalance(player, totalCost.doubleValue())) {
+            player.sendMessage("§cYou don't have enough money! Required: " +
+                plugin.getEconomyManager().format(totalCost) +
+                " (Town creation: " + plugin.getEconomyManager().format(townCreationCost) +
+                " + Initial chunk claim: " + plugin.getEconomyManager().format(chunkClaimCost) + ")" +
+                " | You have: " + plugin.getEconomyManager().format(BigDecimal.valueOf(plugin.getEconomyManager().getBalance(player))));
             return;
         }
 
         plugin.getTownManager().createTown(townName, player.getUniqueId(), player.getLocation())
                 .thenAccept(town -> {
                     if (town != null) {
+                        // Set default rank for the mayor
+                        plugin.getRankManager().setPlayerRank(player.getUniqueId(),
+                            plugin.getRankManager().getRank("assistant").getUuid());
+
                         player.sendMessage(plugin.getConfigManager().getMessage("town.created", townName));
-                        player.sendMessage("§aDeducted " + plugin.getEconomyManager().format(cost) + " for town creation.");
+                        player.sendMessage("§aDeducted " + plugin.getEconomyManager().format(totalCost) +
+                            " for town creation and initial chunk claim.");
+                        player.sendMessage("§aYour town's initial chunk has been automatically claimed!");
                     } else {
-                        // Refund money if town creation failed
-                        plugin.getEconomyManager().depositPlayer(player, cost.doubleValue());
-                        player.sendMessage("§cFailed to create town. Name might already exist. Money has been refunded.");
+                        player.sendMessage("§cFailed to create town. This could be due to:");
+                        player.sendMessage("§c- Name already exists");
+                        player.sendMessage("§c- Location is in a buffer zone");
+                        player.sendMessage("§c- Chunk is already claimed");
+                        player.sendMessage("§c- World restrictions");
+                        player.sendMessage("§cPlease try a different location or name.");
                     }
                 });
     }
@@ -285,9 +314,32 @@ public class TownCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
+        // Check if the location is claimed by the town
+        ClaimedChunk chunk = plugin.getChunkManager().getClaimedChunk(player.getLocation());
+        if (chunk == null || !chunk.getTownUuid().equals(town.getUuid())) {
+            player.sendMessage("§cYou can only set spawn in your town's claimed territory!");
+            return;
+        }
+
+        // Check if town has enough money for setspawn
+        BigDecimal setSpawnCost = BigDecimal.valueOf(500.0);
+        if (!plugin.getEconomyManager().hasTownBalance(town.getUuid(), setSpawnCost)) {
+            player.sendMessage("§cYour town doesn't have enough money to set spawn! Required: " +
+                plugin.getEconomyManager().format(setSpawnCost) +
+                " | Town balance: " + plugin.getEconomyManager().format(town.getBalance()));
+            return;
+        }
+
+        // Withdraw money from town
+        if (!plugin.getEconomyManager().withdrawTown(town.getUuid(), setSpawnCost)) {
+            player.sendMessage("§cFailed to withdraw money from town treasury!");
+            return;
+        }
+
         town.setSpawn(player.getLocation());
         plugin.getTownManager().saveTown(town);
         player.sendMessage("§aTown spawn set to your current location.");
+        player.sendMessage("§aDeducted " + plugin.getEconomyManager().format(setSpawnCost) + " from town treasury.");
     }
 
     private void handleDeposit(Player player, String[] args) {
@@ -636,6 +688,81 @@ public class TownCommand implements CommandExecutor, TabCompleter {
                 });
     }
 
+    private void handleRank(Player player, String[] args) {
+        if (args.length < 3) {
+            player.sendMessage("§cUsage: /town rank <add|remove|set> <player> [rank]");
+            player.sendMessage("§cAvailable ranks: resident, manager, assistant");
+            return;
+        }
+
+        TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(player.getUniqueId());
+        if (townyPlayer == null || !townyPlayer.hasTown()) {
+            player.sendMessage(plugin.getConfigManager().getMessage("town.not-in-town"));
+            return;
+        }
+
+        Town town = plugin.getTownManager().getTown(townyPlayer.getTownUuid());
+        if (town == null) {
+            player.sendMessage(plugin.getConfigManager().getMessage("general.error"));
+            return;
+        }
+
+        // Check if player has permission to manage ranks
+        if (!town.isMayor(player.getUniqueId()) &&
+            !plugin.getRankManager().playerHasPermission(player.getUniqueId(), "towny.town.rank")) {
+            player.sendMessage("§cYou don't have permission to manage town ranks!");
+            return;
+        }
+
+        String action = args[1].toLowerCase();
+        String targetPlayerName = args[2];
+
+        Player targetPlayer = plugin.getServer().getPlayer(targetPlayerName);
+        if (targetPlayer == null) {
+            player.sendMessage("§cPlayer not found or not online!");
+            return;
+        }
+
+        if (!town.hasResident(targetPlayer.getUniqueId())) {
+            player.sendMessage("§cPlayer must be a resident of the town!");
+            return;
+        }
+
+        switch (action) {
+            case "set" -> {
+                if (args.length < 4) {
+                    player.sendMessage("§cUsage: /town rank set <player> <rank>");
+                    return;
+                }
+
+                String rankName = args[3];
+                var rank = plugin.getRankManager().getRank(rankName);
+
+                if (rank == null || !rank.isTownRank()) {
+                    player.sendMessage("§cInvalid town rank: " + rankName);
+                    return;
+                }
+
+                plugin.getRankManager().setPlayerRank(targetPlayer.getUniqueId(), rank.getUuid())
+                    .thenAccept(success -> {
+                        if (success) {
+                            player.sendMessage("§aSet " + targetPlayer.getName() + "'s rank to " + rank.getDisplayName());
+                            targetPlayer.sendMessage("§aYour town rank has been set to " + rank.getDisplayName());
+                        } else {
+                            player.sendMessage("§cFailed to set rank!");
+                        }
+                    });
+            }
+            default -> player.sendMessage("§cInvalid action. Use: set");
+        }
+    }
+
+    private boolean hasClaimPermission(Town town, UUID playerUuid) {
+        // Check if player has claim permission through rank system or is mayor
+        return plugin.getRankManager().playerHasPermission(playerUuid, "towny.town.claim") ||
+                town.isMayor(playerUuid);
+    }
+
     private void showHelp(Player player) {
         player.sendMessage("§6=== Town Commands ===");
         player.sendMessage("§e/town §7- Show town info");
@@ -645,8 +772,7 @@ public class TownCommand implements CommandExecutor, TabCompleter {
         player.sendMessage("§e/town leave §7- Leave your town");
         player.sendMessage("§e/town invite <player> §7- Invite a player");
         player.sendMessage("§e/town kick <player> §7- Kick a player");
-        player.sendMessage("§e/town claim §7- Claim current chunk");
-        player.sendMessage("§e/town unclaim §7- Unclaim current chunk");
+        player.sendMessage("§e/town rank set <player> <rank> §7- Set player's town rank");
         player.sendMessage("§e/town spawn [town] §7- Teleport to town spawn");
         player.sendMessage("§e/town setspawn §7- Set town spawn");
         player.sendMessage("§e/town deposit <amount> §7- Deposit to town bank");
@@ -709,8 +835,8 @@ public class TownCommand implements CommandExecutor, TabCompleter {
 
         if (args.length == 1) {
             List<String> subCommands = Arrays.asList(
-                    "create", "delete", "join", "leave", "invite", "kick",
-                    "claim", "unclaim", "spawn", "setspawn", "deposit", "withdraw",
+                    "create", "delete", "join", "leave", "invite", "kick", "rank",
+                    "spawn", "setspawn", "deposit", "withdraw",
                     "set", "toggle", "info", "list"
             );
 
@@ -737,6 +863,14 @@ public class TownCommand implements CommandExecutor, TabCompleter {
                         }
                     }
                 }
+                case "rank" -> {
+                    List<String> rankActions = Arrays.asList("set");
+                    for (String action : rankActions) {
+                        if (action.toLowerCase().startsWith(args[1].toLowerCase())) {
+                            completions.add(action);
+                        }
+                    }
+                }
                 case "set" -> {
                     List<String> properties = Arrays.asList("name", "board", "tax", "mayor");
                     for (String prop : properties) {
@@ -754,9 +888,32 @@ public class TownCommand implements CommandExecutor, TabCompleter {
                     }
                 }
             }
+        } else if (args.length == 3 && args[0].equalsIgnoreCase("rank") && args[1].equalsIgnoreCase("set")) {
+            // Players in town for rank management
+            if (sender instanceof Player player) {
+                TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(player.getUniqueId());
+                if (townyPlayer != null && townyPlayer.hasTown()) {
+                    Town town = plugin.getTownManager().getTown(townyPlayer.getTownUuid());
+                    if (town != null) {
+                        for (UUID residentUuid : town.getResidents()) {
+                            Player resident = plugin.getServer().getPlayer(residentUuid);
+                            if (resident != null && resident.getName().toLowerCase().startsWith(args[2].toLowerCase())) {
+                                completions.add(resident.getName());
+                            }
+                        }
+                    }
+                }
+            }
+        } else if (args.length == 4 && args[0].equalsIgnoreCase("rank") && args[1].equalsIgnoreCase("set")) {
+            // Town ranks
+            List<String> ranks = Arrays.asList("resident", "manager", "assistant");
+            for (String rank : ranks) {
+                if (rank.toLowerCase().startsWith(args[3].toLowerCase())) {
+                    completions.add(rank);
+                }
+            }
         }
 
         return completions;
     }
 }
-

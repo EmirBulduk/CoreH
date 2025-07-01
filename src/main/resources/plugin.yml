@@ -1,9 +1,9 @@
 name: EnhancedCoreH
-version: 1.0.0
+version: 1.1.0
 main: org.arch.me.EnhancedCoreH
-description: CoreHistory plugin Enhanced - A comprehensive Towny-like plugin
+description: BELDE Yonetim sistemi
 author: Arch64
-website: https://papermc.io
+website: https://www.arch64.me
 api-version: '1.21'
 depend:
   - Vault

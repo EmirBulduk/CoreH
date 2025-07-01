@@ -1,112 +1,51 @@
 package org.arch.me.models;
 
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
-// Rank model
 public class Rank {
-    private int id;
+    private UUID uuid;
     private String name;
-    private String prefix;
-    private String suffix;
+    private String displayName;
+    private int priority; // Higher priority = higher rank
     private Set<String> permissions;
-    private int priority;
     private boolean isDefault;
-    private Map<String, Object> metadata;
+    private String type; // "TOWN" or "NATION"
 
-    public Rank(int id, String name) {
-        this.id = id;
+    public Rank(UUID uuid, String name, String type) {
+        this.uuid = uuid;
         this.name = name;
-        this.permissions = new HashSet<>();
+        this.type = type;
+        this.displayName = name;
         this.priority = 0;
+        this.permissions = new HashSet<>();
         this.isDefault = false;
-        this.metadata = new HashMap<>();
     }
 
-    // Getters and setters
-    public int getId() {
-        return id;
-    }
+    // Getters and Setters
+    public UUID getUuid() { return uuid; }
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
 
-    public void setId(int id) {
-        this.id = id;
-    }
-
-    public String getName() {
-        return name;
-    }
-
-    public void setName(String name) {
-        this.name = name;
-    }
-
-    public String getPrefix() {
-        return prefix;
-    }
-
-    public void setPrefix(String prefix) {
-        this.prefix = prefix;
-    }
-
-    public String getSuffix() {
-        return suffix;
-    }
-
-    public void setSuffix(String suffix) {
-        this.suffix = suffix;
-    }
-
-    public Set<String> getPermissions() {
-        return permissions;
-    }
-
-    public void setPermissions(Set<String> permissions) {
-        this.permissions = permissions;
-    }
+    public String getDisplayName() { return displayName; }
+    public void setDisplayName(String displayName) { this.displayName = displayName; }
 
     public int getPriority() { return priority; }
     public void setPriority(int priority) { this.priority = priority; }
 
-    public boolean isDefault() {
-        return isDefault;
-    }
+    public Set<String> getPermissions() { return permissions; }
+    public void setPermissions(Set<String> permissions) { this.permissions = permissions; }
+    public void addPermission(String permission) { this.permissions.add(permission); }
+    public void removePermission(String permission) { this.permissions.remove(permission); }
+    public boolean hasPermission(String permission) { return permissions.contains(permission); }
 
-    public void setDefault(boolean aDefault) {
-        isDefault = aDefault;
-    }
+    public boolean isDefault() { return isDefault; }
+    public void setDefault(boolean isDefault) { this.isDefault = isDefault; }
 
-    public Map<String, Object> getMetadata() {
-        return metadata;
-    }
+    public String getType() { return type; }
+    public void setType(String type) { this.type = type; }
 
-    public void setMetadata(Map<String, Object> metadata) {
-        this.metadata = metadata;
-    }
-
-    // Utility methods
-    public boolean hasPermission(String permission) {
-        return permissions.contains(permission);
-    }
-
-    public void addPermission(String permission) {
-        permissions.add(permission);
-    }
-
-    public void removePermission(String permission) {
-        permissions.remove(permission);
-    }
-
-    public String getFormattedName() {
-        StringBuilder formatted = new StringBuilder();
-        if (prefix != null && !prefix.isEmpty()) {
-            formatted.append(prefix);
-        }
-        formatted.append(name);
-        if (suffix != null && !suffix.isEmpty()) {
-            formatted.append(suffix);
-        }
-        return formatted.toString().replace("&", "§");
-    }
+    public boolean isTownRank() { return "TOWN".equals(type); }
+    public boolean isNationRank() { return "NATION".equals(type); }
 }

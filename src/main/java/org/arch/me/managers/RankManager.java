@@ -1,50 +1,72 @@
 package org.arch.me.managers;
 
 import org.arch.me.EnhancedCoreH;
-import org.arch.me.database.DatabaseManager;
 import org.arch.me.models.Rank;
-import org.arch.me.models.TownyPlayer;
-import java.math.BigDecimal;
+import org.bukkit.Bukkit;
+
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class RankManager {
-
     private final EnhancedCoreH plugin;
-    private final Map<Integer, Rank> rankCache = new ConcurrentHashMap<>();
-    private final Map<String, Integer> rankNameCache = new ConcurrentHashMap<>();
+    private final Map<UUID, Rank> rankCache;
+    private final Map<String, UUID> rankNameCache; // name -> uuid
+    private final Map<UUID, UUID> playerRanks; // playerUuid -> rankUuid
 
     public RankManager(EnhancedCoreH plugin) {
         this.plugin = plugin;
+        this.rankCache = new ConcurrentHashMap<>();
+        this.rankNameCache = new ConcurrentHashMap<>();
+        this.playerRanks = new ConcurrentHashMap<>();
+        initializeDefaultRanks();
         loadAllRanks();
+    }
+
+    private void initializeDefaultRanks() {
+        try {
+            // Create default town ranks
+            createDefaultRank("resident", "TOWN", 0, Arrays.asList("towny.town.resident"));
+            createDefaultRank("manager", "TOWN", 50, Arrays.asList("towny.town.resident", "towny.town.claim", "towny.town.unclaim", "towny.town.invite", "towny.town.kick", "towny.town.set.flags"));
+            createDefaultRank("assistant", "TOWN", 75, Arrays.asList("towny.town.resident", "towny.town.claim", "towny.town.unclaim", "towny.town.invite", "towny.town.kick", "towny.town.set.*", "towny.town.toggle.*"));
+            
+            // Create default nation ranks
+            createDefaultRank("citizen", "NATION", 0, Arrays.asList("towny.nation.citizen"));
+            createDefaultRank("advisor", "NATION", 50, Arrays.asList("towny.nation.citizen", "towny.nation.invite", "towny.nation.kick", "towny.nation.ally", "towny.nation.enemy"));
+            createDefaultRank("minister", "NATION", 75, Arrays.asList("towny.nation.citizen", "towny.nation.invite", "towny.nation.kick", "towny.nation.ally", "towny.nation.enemy", "towny.nation.set.*", "towny.nation.toggle.*"));
+            
+        } catch (Exception e) {
+            plugin.getLogger().severe("Failed to initialize default ranks: " + e.getMessage());
+        }
+    }
+
+    private void createDefaultRank(String name, String type, int priority, List<String> permissions) {
+        UUID rankUuid = UUID.randomUUID();
+        Rank rank = new Rank(rankUuid, name, type);
+        rank.setPriority(priority);
+        rank.setPermissions(new HashSet<>(permissions));
+        rank.setDefault(name.equals("resident") || name.equals("citizen"));
+
+        saveRank(rank);
+        rankCache.put(rankUuid, rank);
+        rankNameCache.put(name.toLowerCase(), rankUuid);
     }
 
     private void loadAllRanks() {
         try {
-            DatabaseManager db = plugin.getDatabaseManager();
-            String sql = "SELECT * FROM %sranks ORDER BY priority DESC".formatted(db.getTablePrefix());
+            String sql = "SELECT * FROM %sranks".formatted(plugin.getDatabaseManager().getTablePrefix());
 
-            List<Rank> ranks = db.queryList(sql, rs -> {
-                Rank rank = new Rank(rs.getInt("id"), rs.getString("name"));
-
-                rank.setPrefix(rs.getString("prefix"));
-                rank.setSuffix(rs.getString("suffix"));
-                rank.setPriority(rs.getInt("priority"));
-                rank.setDefault(rs.getBoolean("is_default"));
-
-                // Load permissions and metadata
-                loadRankPermissions(rank, rs.getString("permissions"));
-                loadRankMetadata(rank, rs.getString("metadata"));
-
-                return rank;
-            });
+            List<Rank> ranks = plugin.getDatabaseManager().queryList(sql, this::createRankFromResultSet);
 
             for (Rank rank : ranks) {
-                rankCache.put(rank.getId(), rank);
-                rankNameCache.put(rank.getName().toLowerCase(), rank.getId());
+                rankCache.put(rank.getUuid(), rank);
+                rankNameCache.put(rank.getName().toLowerCase(), rank.getUuid());
             }
+
+            // Load player ranks
+            loadPlayerRanks();
 
             plugin.getLogger().info("Loaded " + ranks.size() + " ranks from database");
 
@@ -54,124 +76,83 @@ public class RankManager {
         }
     }
 
-    private void loadRankPermissions(Rank rank, String permissionsJson) {
-        if (permissionsJson != null && !permissionsJson.isEmpty()) {
-            Set<String> permissions = new HashSet<>(Arrays.asList(permissionsJson.split(",")));
-            rank.setPermissions(permissions);
-        }
-    }
+    private void loadPlayerRanks() throws SQLException {
+        String sql = "SELECT player_uuid, rank_uuid FROM %splayer_ranks".formatted(plugin.getDatabaseManager().getTablePrefix());
 
-    private void loadRankMetadata(Rank rank, String metadataJson) {
-        // TODO: Implement JSON parsing for metadata
-    }
-
-    public boolean rankNameExists(String name) {
-        return rankNameCache.containsKey(name.toLowerCase());
-    }
-
-    public Rank getRank(int id) {
-        return rankCache.get(id);
-    }
-
-    public Rank getDefaultRank() {
-        return rankCache.values().stream()
-                .filter(Rank::isDefault)
-                .findFirst()
-                .orElse(null);
-    }
-
-    public CompletableFuture<Rank> createRank(String name, String prefix, String suffix, int priority) {
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                // Check if rank name already exists
-                if (rankNameExists(name)) {
-                    return null;
-                }
-
-                // Generate new ID
-                int newId = getNextRankId();
-
-                Rank rank = new Rank(newId, name);
-                rank.setPrefix(prefix);
-                rank.setSuffix(suffix);
-                rank.setPriority(priority);
-
-                // Save to database
-                saveRank(rank);
-
-                // Add to cache
-                rankCache.put(newId, rank);
-                rankNameCache.put(name.toLowerCase(), newId);
-
-                plugin.getLogger().info("Created new rank: " + name);
-                return rank;
-
-            } catch (Exception e) {
-                plugin.getLogger().severe("Failed to create rank: " + e.getMessage());
-                e.printStackTrace();
-                return null;
-            }
+        plugin.getDatabaseManager().queryList(sql, rs -> {
+            UUID playerUuid = UUID.fromString(rs.getString("player_uuid"));
+            UUID rankUuid = UUID.fromString(rs.getString("rank_uuid"));
+            playerRanks.put(playerUuid, rankUuid);
+            return null;
         });
     }
 
-    public CompletableFuture<Boolean> deleteRank(int rankId) {
+    public CompletableFuture<Boolean> setPlayerRank(UUID playerUuid, UUID rankUuid) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                Rank rank = getRank(rankId);
-                if (rank == null || rank.isDefault()) {
-                    return false;
-                }
+                String sql = """
+                    INSERT INTO %splayer_ranks (player_uuid, rank_uuid) VALUES (?, ?)
+                    ON DUPLICATE KEY UPDATE rank_uuid = VALUES(rank_uuid)
+                """.formatted(plugin.getDatabaseManager().getTablePrefix());
 
-                // Move all players with this rank to default rank
-                Rank defaultRank = getDefaultRank();
-                if (defaultRank != null) {
-                    DatabaseManager db = plugin.getDatabaseManager();
-                    String updateSql = "UPDATE %splayers SET rank_id = ? WHERE rank_id = ?".formatted(db.getTablePrefix());
-                    db.executeUpdate(updateSql, defaultRank.getId(), rankId);
-                }
-
-                // Delete from database
-                DatabaseManager db = plugin.getDatabaseManager();
-                String sql = "DELETE FROM %sranks WHERE id = ?".formatted(db.getTablePrefix());
-                db.executeUpdate(sql, rankId);
-
-                // Remove from cache
-                rankCache.remove(rankId);
-                rankNameCache.remove(rank.getName().toLowerCase());
-
-                plugin.getLogger().info("Deleted rank: " + rank.getName());
+                plugin.getDatabaseManager().executeUpdate(sql, playerUuid.toString(), rankUuid.toString());
+                playerRanks.put(playerUuid, rankUuid);
                 return true;
 
-            } catch (Exception e) {
-                plugin.getLogger().severe("Failed to delete rank: " + e.getMessage());
-                e.printStackTrace();
+            } catch (SQLException e) {
+                plugin.getLogger().severe("Failed to set player rank: " + e.getMessage());
                 return false;
             }
-        });
+        }, Bukkit.getScheduler().getMainThreadExecutor(plugin));
+    }
+
+    public boolean playerHasPermission(UUID playerUuid, String permission) {
+        UUID rankUuid = playerRanks.get(playerUuid);
+        if (rankUuid == null) return false;
+
+        Rank rank = rankCache.get(rankUuid);
+        return rank != null && rank.hasPermission(permission);
+    }
+
+    public Rank getPlayerRank(UUID playerUuid) {
+        UUID rankUuid = playerRanks.get(playerUuid);
+        return rankUuid != null ? rankCache.get(rankUuid) : null;
+    }
+
+    public List<Rank> getRanksByType(String type) {
+        return rankCache.values().stream()
+            .filter(rank -> rank.getType().equals(type))
+            .sorted(Comparator.comparingInt(Rank::getPriority).reversed())
+            .toList();
+    }
+
+    public Rank getRank(String name) {
+        UUID rankUuid = rankNameCache.get(name.toLowerCase());
+        return rankUuid != null ? rankCache.get(rankUuid) : null;
+    }
+
+    public Rank getRank(UUID uuid) {
+        return rankCache.get(uuid);
     }
 
     public void saveRank(Rank rank) {
         try {
-            DatabaseManager db = plugin.getDatabaseManager();
-
             String sql = """
-                INSERT INTO %sranks (id, name, prefix, suffix, permissions, priority, is_default, metadata) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO %sranks (uuid, name, display_name, priority, permissions, is_default, type)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE
-                name = VALUES(name), prefix = VALUES(prefix), suffix = VALUES(suffix),
-                permissions = VALUES(permissions), priority = VALUES(priority), is_default = VALUES(is_default),
-                metadata = VALUES(metadata)
-                """.formatted(db.getTablePrefix());
+                name = VALUES(name), display_name = VALUES(display_name), priority = VALUES(priority),
+                permissions = VALUES(permissions), is_default = VALUES(is_default), type = VALUES(type)
+            """.formatted(plugin.getDatabaseManager().getTablePrefix());
 
-            db.executeUpdate(sql,
-                    rank.getId(),
-                    rank.getName(),
-                    rank.getPrefix(),
-                    rank.getSuffix(),
-                    serializePermissions(rank.getPermissions()),
-                    rank.getPriority(),
-                    rank.isDefault(),
-                    serializeMetadata(rank.getMetadata())
+            plugin.getDatabaseManager().executeUpdate(sql,
+                rank.getUuid().toString(),
+                rank.getName(),
+                rank.getDisplayName(),
+                rank.getPriority(),
+                String.join(",", rank.getPermissions()),
+                rank.isDefault(),
+                rank.getType()
             );
 
         } catch (SQLException e) {
@@ -180,94 +161,21 @@ public class RankManager {
         }
     }
 
-    public boolean setPlayerRank(UUID playerUuid, int rankId) {
-        TownyPlayer player = plugin.getPlayerManager().getPlayer(playerUuid);
-        Rank rank = getRank(rankId);
+    private Rank createRankFromResultSet(ResultSet rs) throws SQLException {
+        UUID uuid = UUID.fromString(rs.getString("uuid"));
+        String name = rs.getString("name");
+        String type = rs.getString("type");
 
-        if (player == null || rank == null) {
-            return false;
+        Rank rank = new Rank(uuid, name, type);
+        rank.setDisplayName(rs.getString("display_name"));
+        rank.setPriority(rs.getInt("priority"));
+        rank.setDefault(rs.getBoolean("is_default"));
+
+        String permissionsStr = rs.getString("permissions");
+        if (permissionsStr != null && !permissionsStr.isEmpty()) {
+            rank.setPermissions(new HashSet<>(Arrays.asList(permissionsStr.split(","))));
         }
 
-        player.setRankId(rankId);
-        plugin.getPlayerManager().savePlayer(player);
-
-        return true;
+        return rank;
     }
-
-    public boolean setPlayerRank(UUID playerUuid, String rankName) {
-        Integer rankId = rankNameCache.get(rankName.toLowerCase());
-        if (rankId == null) {
-            return false;
-        }
-
-        return setPlayerRank(playerUuid, rankId);
-    }
-
-    public Rank getPlayerRank(UUID playerUuid) {
-        TownyPlayer player = plugin.getPlayerManager().getPlayer(playerUuid);
-        if (player == null) {
-            return getDefaultRank();
-        }
-
-        Rank rank = getRank(player.getRankId());
-        return rank != null ? rank : getDefaultRank();
-    }
-
-    public boolean playerHasPermission(UUID playerUuid, String permission) {
-        Rank rank = getPlayerRank(playerUuid);
-        if (rank != null && rank.hasPermission(permission)) {
-            return true;
-        }
-
-        // Check player-specific permissions
-        TownyPlayer player = plugin.getPlayerManager().getPlayer(playerUuid);
-        return player != null && player.hasPermission(permission);
-    }
-
-    private int getNextRankId() {
-        try {
-            DatabaseManager db = plugin.getDatabaseManager();
-            String sql = "SELECT MAX(id) FROM %sranks".formatted(db.getTablePrefix());
-            Integer maxId = db.queryObject(sql, rs -> rs.getInt(1));
-            return (maxId != null ? maxId : 0) + 1;
-        } catch (SQLException e) {
-            plugin.getLogger().severe("Failed to get next rank ID: " + e.getMessage());
-            return 1;
-        }
-    }
-
-    private String serializePermissions(Set<String> permissions) {
-        return String.join(",", permissions);
-    }
-
-    private String serializeMetadata(Map<String, Object> metadata) {
-        return ""; // TODO: Implement JSON serialization
-    }
-
-    // Getters
-    public Rank getRank(String name) {
-        Integer id = rankNameCache.get(name.toLowerCase());
-        return id != null ? rankCache.get(id) : null;
-    }
-
-    public Collection<Rank> getAllRanks() {
-        return rankCache.values();
-    }
-
-
-
-    public List<Rank> getRanksByPriority() {
-        return rankCache.values().stream()
-                .sorted((r1, r2) -> Integer.compare(r2.getPriority(), r1.getPriority()))
-                .toList();
-    }
-
-    public boolean rankExists(int id) {
-        return rankCache.containsKey(id);
-    }
-
-    public int getRankCount() {
-        return rankCache.size();
-    }
-
 }

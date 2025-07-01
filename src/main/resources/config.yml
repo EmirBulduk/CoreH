@@ -4,6 +4,9 @@ chunks:
   wilderness-permissions:
     build: true
     destroy: true
+    interact: true
+    switch: true
+    itemuse: true
 war:
-  declaration-cost: 10000.0
-  preparation-time-minutes: 20
+  declaration-cost: 20000.0
+  preparation-time-minutes: 10
