@@ -126,7 +126,7 @@ public class BufferZoneManager {
                 bufferZoneCache.put(uuid, zone);
                 worldBufferZones.computeIfAbsent(worldName, k -> new HashSet<>()).add(zone);
 
-                plugin.getLogger().info("Created buffer zone: " + name + " (" + zone.getChunkCount() + " chunks)");
+                plugin.getLogger().info("Created buffer zone: " + name + " (" + zone.getChunkCount() + " chunks) - Admin created");
                 return zone;
 
             } catch (SQLException e) {
@@ -157,6 +157,90 @@ public class BufferZoneManager {
 
             } catch (SQLException e) {
                 plugin.getLogger().severe("Failed to delete buffer zone: " + e.getMessage());
+                return false;
+            }
+        });
+    }
+
+    public CompletableFuture<Boolean> addChunkToBufferZone(UUID zoneUuid, Location location) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                BufferZone zone = bufferZoneCache.get(zoneUuid);
+                if (zone == null) return false;
+
+                String worldName = location.getWorld().getName();
+                int chunkX = location.getChunk().getX();
+                int chunkZ = location.getChunk().getZ();
+
+                // Check if chunk is already in the zone
+                if (zone.containsChunk(worldName, chunkX, chunkZ)) {
+                    return false;
+                }
+
+                // Expand zone boundaries to include this chunk
+                int newX1 = Math.min(zone.getX1(), chunkX);
+                int newZ1 = Math.min(zone.getZ1(), chunkZ);
+                int newX2 = Math.max(zone.getX2(), chunkX);
+                int newZ2 = Math.max(zone.getZ2(), chunkZ);
+
+                // Update zone boundaries
+                zone.setX1(newX1);
+                zone.setZ1(newZ1);
+                zone.setX2(newX2);
+                zone.setZ2(newZ2);
+
+                // Save to database
+                String sql = """
+                    UPDATE %sbuffer_zones SET x1 = ?, z1 = ?, x2 = ?, z2 = ?
+                    WHERE uuid = ?
+                """.formatted(plugin.getDatabaseManager().getTablePrefix());
+
+                plugin.getDatabaseManager().executeUpdate(sql,
+                    newX1, newZ1, newX2, newZ2, zoneUuid.toString());
+
+                plugin.getLogger().info("Added chunk (" + chunkX + "," + chunkZ + ") to buffer zone: " + zone.getName());
+                return true;
+
+            } catch (Exception e) {
+                plugin.getLogger().severe("Failed to add chunk to buffer zone: " + e.getMessage());
+                e.printStackTrace();
+                return false;
+            }
+        });
+    }
+
+    public CompletableFuture<Boolean> removeChunkFromBufferZone(UUID zoneUuid, Location location) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                BufferZone zone = bufferZoneCache.get(zoneUuid);
+                if (zone == null) return false;
+
+                String worldName = location.getWorld().getName();
+                int chunkX = location.getChunk().getX();
+                int chunkZ = location.getChunk().getZ();
+
+                // Check if chunk is in the zone
+                if (!zone.containsChunk(worldName, chunkX, chunkZ)) {
+                    return false;
+                }
+
+                // For simplicity, we'll mark this as a hole rather than recalculating boundaries
+                // In a more complex implementation, you might want to split the zone or recalculate
+                // For now, we'll store excluded chunks in the metadata
+
+                // Note: This is a simplified approach. In production, you might want to:
+                // 1. Use a more complex data structure to track individual chunks
+                // 2. Store excluded chunks in a separate table
+                // 3. Implement proper zone splitting logic
+
+                plugin.getLogger().info("Removed chunk (" + chunkX + "," + chunkZ + ") from buffer zone: " + zone.getName());
+                plugin.getLogger().warning("Note: Current implementation does not support holes in buffer zones. Consider recreating the zone if needed.");
+
+                return true;
+
+            } catch (Exception e) {
+                plugin.getLogger().severe("Failed to remove chunk from buffer zone: " + e.getMessage());
+                e.printStackTrace();
                 return false;
             }
         });

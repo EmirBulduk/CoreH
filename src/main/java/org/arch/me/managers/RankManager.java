@@ -135,6 +135,26 @@ public class RankManager {
         return rankCache.get(uuid);
     }
 
+    /**
+     * Get the default rank (resident for towns, citizen for nations)
+     */
+    public Rank getDefaultRank() {
+        return rankCache.values().stream()
+                .filter(Rank::isDefault)
+                .findFirst()
+                .orElse(getRank("resident")); // Fallback to resident rank
+    }
+
+    /**
+     * Get default rank by type
+     */
+    public Rank getDefaultRank(String type) {
+        return rankCache.values().stream()
+                .filter(rank -> rank.getType().equals(type) && rank.isDefault())
+                .findFirst()
+                .orElse(null);
+    }
+
     public void saveRank(Rank rank) {
         try {
             String sql = """
@@ -167,6 +187,7 @@ public class RankManager {
         String type = rs.getString("type");
 
         Rank rank = new Rank(uuid, name, type);
+        rank.setId(rs.getInt("id")); // Set the database ID
         rank.setDisplayName(rs.getString("display_name"));
         rank.setPriority(rs.getInt("priority"));
         rank.setDefault(rs.getBoolean("is_default"));

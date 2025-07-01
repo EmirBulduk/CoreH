@@ -182,8 +182,20 @@ public class War {
                status == WarStatus.CANCELLED;
     }
 
+    // War participation and enemy checks
     public boolean isParticipant(UUID nationUuid) {
-        return isDeclaringSide(nationUuid) || isDefendingSide(nationUuid);
+        return declaringNationUuid.equals(nationUuid) ||
+               defendingNationUuid.equals(nationUuid) ||
+               declaringAllies.contains(nationUuid) ||
+               defendingAllies.contains(nationUuid);
+    }
+
+    public boolean areEnemies(UUID nation1, UUID nation2) {
+        boolean nation1Declaring = isDeclaringSide(nation1);
+        boolean nation2Declaring = isDeclaringSide(nation2);
+
+        // They are enemies if they are on different sides
+        return nation1Declaring != nation2Declaring;
     }
 
     public boolean isDeclaringSide(UUID nationUuid) {
@@ -194,11 +206,28 @@ public class War {
         return defendingNationUuid.equals(nationUuid) || defendingAllies.contains(nationUuid);
     }
 
-    public boolean areEnemies(UUID nation1, UUID nation2) {
-        return (isDeclaringSide(nation1) && isDefendingSide(nation2)) ||
-               (isDefendingSide(nation1) && isDeclaringSide(nation2));
+    public Set<UUID> getAllDeclaringSide() {
+        Set<UUID> all = new HashSet<>();
+        all.add(declaringNationUuid);
+        all.addAll(declaringAllies);
+        return all;
     }
 
+    public Set<UUID> getAllDefendingSide() {
+        Set<UUID> all = new HashSet<>();
+        all.add(defendingNationUuid);
+        all.addAll(defendingAllies);
+        return all;
+    }
+
+    public Set<UUID> getAllParticipants() {
+        Set<UUID> all = new HashSet<>();
+        all.addAll(getAllDeclaringSide());
+        all.addAll(getAllDefendingSide());
+        return all;
+    }
+
+    // Ally management
     public void addDeclaringAlly(UUID nationUuid) {
         declaringAllies.add(nationUuid);
     }
@@ -213,25 +242,6 @@ public class War {
 
     public void removeDefendingAlly(UUID nationUuid) {
         defendingAllies.remove(nationUuid);
-    }
-
-    public Set<UUID> getAllDeclaringSide() {
-        Set<UUID> allDeclaring = new HashSet<>(declaringAllies);
-        allDeclaring.add(declaringNationUuid);
-        return allDeclaring;
-    }
-
-    public Set<UUID> getAllDefendingSide() {
-        Set<UUID> allDefending = new HashSet<>(defendingAllies);
-        allDefending.add(defendingNationUuid);
-        return allDefending;
-    }
-
-    public Set<UUID> getAllParticipants() {
-        Set<UUID> participants = new HashSet<>();
-        participants.addAll(getAllDeclaringSide());
-        participants.addAll(getAllDefendingSide());
-        return participants;
     }
 
     public void addPlayerToCapitalChunk(UUID playerUuid) {

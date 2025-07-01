@@ -49,7 +49,7 @@ public class TownyAdminCommand implements CommandExecutor, TabCompleter {
 
     private void handleBuffer(CommandSender sender, String[] args) {
         if (args.length < 2) {
-            sender.sendMessage("§cUsage: /townyadmin buffer <create|delete|list|info|toggle>");
+            sender.sendMessage("§cUsage: /townyadmin buffer <create|delete|list|info|toggle|pos1|pos2>");
             return;
         }
 
@@ -61,8 +61,57 @@ public class TownyAdminCommand implements CommandExecutor, TabCompleter {
             case "list" -> handleBufferList(sender, args);
             case "info" -> handleBufferInfo(sender, args);
             case "toggle" -> handleBufferToggle(sender, args);
-            default -> sender.sendMessage("§cInvalid buffer action. Use: create, delete, list, info, toggle");
+            case "pos1" -> handleBufferPos1(sender, args);
+            case "pos2" -> handleBufferPos2(sender, args);
+            default -> sender.sendMessage("§cInvalid buffer action. Use: create, delete, list, info, toggle, pos1, pos2");
         }
+    }
+
+    private void handleBufferPos1(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage("§cThis command can only be used by players!");
+            return;
+        }
+
+        Location location = player.getLocation();
+        player.setMetadata("towny_pos1", new org.bukkit.metadata.FixedMetadataValue(plugin, location));
+        player.sendMessage("§9★ §bFirst corner set at: §f" +
+                location.getBlockX() + ", " + location.getBlockY() + ", " + location.getBlockZ() +
+                " §9★ §7(UN Buffer Zone)");
+    }
+
+    private void handleBufferPos2(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage("§cThis command can only be used by players!");
+            return;
+        }
+
+        Location location = player.getLocation();
+        player.setMetadata("towny_pos2", new org.bukkit.metadata.FixedMetadataValue(plugin, location));
+        player.sendMessage("§9★ §bSecond corner set at: §f" +
+                location.getBlockX() + ", " + location.getBlockY() + ", " + location.getBlockZ() +
+                " §9★ §7(UN Buffer Zone)");
+
+        // Show selection info if both positions are set
+        Location pos1 = getPlayerPosition(player, "pos1");
+        if (pos1 != null) {
+            int chunks = calculateChunkCount(pos1, location);
+            player.sendMessage("§9★ §bSelection covers §f" + chunks + " §bchunks §9★");
+        }
+    }
+
+    private int calculateChunkCount(Location pos1, Location pos2) {
+        int x1 = pos1.getChunk().getX();
+        int z1 = pos1.getChunk().getZ();
+        int x2 = pos2.getChunk().getX();
+        int z2 = pos2.getChunk().getZ();
+
+        int minX = Math.min(x1, x2);
+        int maxX = Math.max(x1, x2);
+        int minZ = Math.min(z1, z2);
+        int maxZ = Math.max(z1, z2);
+
+        return (maxX - minX + 1) * (maxZ - minZ + 1);
     }
 
     private void handleBufferCreate(CommandSender sender, String[] args) {
@@ -72,8 +121,8 @@ public class TownyAdminCommand implements CommandExecutor, TabCompleter {
         }
 
         if (args.length < 3) {
-            sender.sendMessage("§cUsage: /townyadmin buffer create <name> [reason]");
-            sender.sendMessage("§cFirst select two corners with /townyadmin buffer pos1 and pos2");
+            sender.sendMessage("§9★ §bUsage: §f/townyadmin buffer create <name> [reason]");
+            sender.sendMessage("§9★ §bFirst select two corners with §f/townyadmin buffer pos1 §band §f/townyadmin buffer pos2");
             return;
         }
 
@@ -81,29 +130,35 @@ public class TownyAdminCommand implements CommandExecutor, TabCompleter {
 
         // Validate buffer zone name
         if (!NameValidator.isValidName(bufferName)) {
-            player.sendMessage("§cInvalid buffer zone name: " + NameValidator.getValidationError(bufferName));
+            player.sendMessage("§9★ §cInvalid buffer zone name: " + NameValidator.getValidationError(bufferName));
             return;
         }
 
-        // Check if player has selected positions (we'll use a simple system with metadata)
+        // Check if player has selected positions
         Location pos1 = getPlayerPosition(player, "pos1");
         Location pos2 = getPlayerPosition(player, "pos2");
 
         if (pos1 == null || pos2 == null) {
-            player.sendMessage("§cYou must select two corners first!");
-            player.sendMessage("§cUse: §e/townyadmin buffer pos1 §cand §e/townyadmin buffer pos2");
+            player.sendMessage("§9★ §cYou must select two corners first!");
+            player.sendMessage("§9★ §bUse: §f/townyadmin buffer pos1 §band §f/townyadmin buffer pos2");
             return;
         }
 
-        String reason = args.length > 3 ? String.join(" ", Arrays.copyOfRange(args, 3, args.length)) : "Admin protected area";
+        String reason = args.length > 3 ? String.join(" ", Arrays.copyOfRange(args, 3, args.length)) : "UN Peacekeeping Zone";
 
+        // Admin bypass - no money or location restrictions
         plugin.getBufferZoneManager().createBufferZone(bufferName, pos1, pos2, player.getUniqueId(), reason)
                 .thenAccept(zone -> {
                     if (zone != null) {
-                        player.sendMessage("§aBuffer zone '" + bufferName + "' created successfully!");
-                        player.sendMessage("§aProtected " + zone.getChunkCount() + " chunks.");
+                        player.sendMessage("§9★ §bBuffer Zone '§f" + bufferName + "§b' created successfully! §9★");
+                        player.sendMessage("§9★ §bProtected §f" + zone.getChunkCount() + " §bchunks §9★");
+                        player.sendMessage("§9★ §7UN Peacekeeping Authority - Admin Override §9★");
+
+                        // Clear selection
+                        player.removeMetadata("towny_pos1", plugin);
+                        player.removeMetadata("towny_pos2", plugin);
                     } else {
-                        player.sendMessage("§cFailed to create buffer zone!");
+                        player.sendMessage("§9★ §cFailed to create buffer zone! §9★");
                     }
                 });
     }
@@ -226,7 +281,7 @@ public class TownyAdminCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage("§aReloading EnhancedCoreH configuration...");
 
         try {
-            plugin.getConfigManager().reloadConfig();
+            plugin.getConfigManager().reloadAllConfigs();
             sender.sendMessage("§aConfiguration reloaded successfully!");
         } catch (Exception e) {
             sender.sendMessage("§cFailed to reload configuration: " + e.getMessage());
@@ -287,7 +342,7 @@ public class TownyAdminCommand implements CommandExecutor, TabCompleter {
         // Simple implementation using player metadata
         // In a real implementation, you might want to use a more sophisticated storage system
         return player.hasMetadata("towny_" + posKey) ?
-               (Location) player.getMetadata("towny_" + posKey).get(0).value() : null;
+                (Location) player.getMetadata("towny_" + posKey).get(0).value() : null;
     }
 
     private void showHelp(CommandSender sender) {

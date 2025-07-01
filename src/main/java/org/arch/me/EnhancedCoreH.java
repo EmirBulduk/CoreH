@@ -30,6 +30,7 @@ public final class EnhancedCoreH extends JavaPlugin {
     private RankManager rankManager;
     private WarManager warManager;
     private BufferZoneManager bufferZoneManager;
+    private TownInvitationManager townInvitationManager;
 
     @Override
     public void onEnable() {
@@ -65,6 +66,7 @@ public final class EnhancedCoreH extends JavaPlugin {
         nationManager = new NationManager(this);
         warManager = new WarManager(this);
         bufferZoneManager = new BufferZoneManager(this);
+        townInvitationManager = new TownInvitationManager(this);
 
         registerCommands();
 
@@ -82,6 +84,7 @@ public final class EnhancedCoreH extends JavaPlugin {
         if (bufferZoneManager != null) {
             bufferZoneManager.shutdown();
         }
+
 
         if (databaseManager != null) {
             databaseManager.closeConnection();
@@ -223,5 +226,9 @@ public final class EnhancedCoreH extends JavaPlugin {
 
     public BufferZoneManager getBufferZoneManager() {
         return bufferZoneManager;
+    }
+
+    public TownInvitationManager getTownInvitationManager() {
+        return townInvitationManager;
     }
 }

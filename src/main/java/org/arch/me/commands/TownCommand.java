@@ -45,6 +45,8 @@ public class TownCommand implements CommandExecutor, TabCompleter {
             case "join" -> handleJoin(player, args);
             case "leave" -> handleLeave(player, args);
             case "invite" -> handleInvite(player, args);
+            case "accept" -> handleAccept(player, args);
+            case "decline" -> handleDecline(player, args);
             case "kick" -> handleKick(player, args);
             case "spawn" -> handleSpawn(player, args);
             case "setspawn" -> handleSetSpawn(player, args);
@@ -637,13 +639,66 @@ public class TownCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
-        plugin.getTownManager().addPlayerToTown(town.getUuid(), target.getUniqueId())
+        // Check if target is already in a town
+        TownyPlayer targetTownyPlayer = plugin.getPlayerManager().getPlayer(target.getUniqueId());
+        if (targetTownyPlayer != null && targetTownyPlayer.hasTown()) {
+            player.sendMessage("§c" + target.getName() + " is already in a town!");
+            return;
+        }
+
+        // Check if player already has a pending invitation
+        if (plugin.getTownInvitationManager().hasActiveInvitation(target.getUniqueId())) {
+            player.sendMessage("§c" + target.getName() + " already has a pending town invitation!");
+            return;
+        }
+
+        plugin.getTownInvitationManager().sendInvitation(town.getUuid(), player.getUniqueId(), target.getUniqueId())
                 .thenAccept(success -> {
                     if (success) {
-                        player.sendMessage("§a" + target.getName() + " has been invited to the town.");
-                        target.sendMessage("§aYou have been invited to join " + town.getName() + "!");
+                        player.sendMessage("§aInvitation sent to " + target.getName() + "!");
                     } else {
-                        player.sendMessage("§cFailed to invite player.");
+                        player.sendMessage("§cFailed to send invitation. Player may already have a pending invitation or be in a town.");
+                    }
+                });
+    }
+
+    private void handleAccept(Player player, String[] args) {
+        // Check if player has a pending invitation
+        if (!plugin.getTownInvitationManager().hasActiveInvitation(player.getUniqueId())) {
+            player.sendMessage("§cYou don't have any pending town invitations!");
+            return;
+        }
+
+        // Check if player is already in a town
+        TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(player.getUniqueId());
+        if (townyPlayer != null && townyPlayer.hasTown()) {
+            player.sendMessage("§cYou are already in a town! Leave your current town first.");
+            return;
+        }
+
+        plugin.getTownInvitationManager().acceptInvitation(player.getUniqueId())
+                .thenAccept(success -> {
+                    if (success) {
+                        player.sendMessage("§aYou have successfully accepted the town invitation!");
+                    } else {
+                        player.sendMessage("§cFailed to accept the invitation. The invitation may have expired or there was an error.");
+                    }
+                });
+    }
+
+    private void handleDecline(Player player, String[] args) {
+        // Check if player has a pending invitation
+        if (!plugin.getTownInvitationManager().hasActiveInvitation(player.getUniqueId())) {
+            player.sendMessage("§cYou don't have any pending town invitations!");
+            return;
+        }
+
+        plugin.getTownInvitationManager().declineInvitation(player.getUniqueId())
+                .thenAccept(success -> {
+                    if (success) {
+                        player.sendMessage("§cYou have declined the town invitation.");
+                    } else {
+                        player.sendMessage("§cFailed to decline the invitation. The invitation may have already expired.");
                     }
                 });
     }
@@ -771,6 +826,8 @@ public class TownCommand implements CommandExecutor, TabCompleter {
         player.sendMessage("§e/town join <town> §7- Join a town");
         player.sendMessage("§e/town leave §7- Leave your town");
         player.sendMessage("§e/town invite <player> §7- Invite a player");
+        player.sendMessage("§e/town accept §7- Accept a town invitation");
+        player.sendMessage("§e/town decline §7- Decline a town invitation");
         player.sendMessage("§e/town kick <player> §7- Kick a player");
         player.sendMessage("§e/town rank set <player> <rank> §7- Set player's town rank");
         player.sendMessage("§e/town spawn [town] §7- Teleport to town spawn");
@@ -835,7 +892,7 @@ public class TownCommand implements CommandExecutor, TabCompleter {
 
         if (args.length == 1) {
             List<String> subCommands = Arrays.asList(
-                    "create", "delete", "join", "leave", "invite", "kick", "rank",
+                    "create", "delete", "join", "leave", "invite", "accept", "decline", "kick", "rank",
                     "spawn", "setspawn", "deposit", "withdraw",
                     "set", "toggle", "info", "list"
             );

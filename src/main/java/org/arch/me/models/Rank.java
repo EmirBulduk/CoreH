@@ -6,6 +6,7 @@ import java.util.UUID;
 
 public class Rank {
     private UUID uuid;
+    private int id; // Database ID
     private String name;
     private String displayName;
     private int priority; // Higher priority = higher rank
@@ -21,15 +22,42 @@ public class Rank {
         this.priority = 0;
         this.permissions = new HashSet<>();
         this.isDefault = false;
+        this.id = 0; // Will be set from database
     }
 
     // Getters and Setters
     public UUID getUuid() { return uuid; }
+
+    public int getId() { return id; }
+    public void setId(int id) { this.id = id; }
+
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
 
     public String getDisplayName() { return displayName; }
     public void setDisplayName(String displayName) { this.displayName = displayName; }
+
+    /**
+     * Get formatted name with color codes and priority indication
+     */
+    public String getFormattedName() {
+        String color = getColorByPriority();
+        return color + displayName + "§r";
+    }
+
+    /**
+     * Get color code based on rank priority
+     */
+    private String getColorByPriority() {
+        return switch (priority) {
+            case 0 -> "§7"; // Gray for default/low priority
+            case 1 -> "§f"; // White for basic ranks
+            case 2 -> "§a"; // Green for assistant/manager
+            case 3 -> "§6"; // Gold for advisor/minister
+            case 4 -> "§c"; // Red for mayor/king
+            default -> priority > 4 ? "§4" : "§8"; // Dark red for highest, dark gray for negative
+        };
+    }
 
     public int getPriority() { return priority; }
     public void setPriority(int priority) { this.priority = priority; }

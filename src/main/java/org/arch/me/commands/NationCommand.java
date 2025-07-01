@@ -47,6 +47,10 @@ public class NationCommand implements CommandExecutor, TabCompleter {
             case "kick" -> handleKick(player, args);
             case "join" -> handleJoin(player, args);
             case "leave" -> handleLeave(player, args);
+            case "confirm_join" -> handleConfirmJoin(player, args);
+            case "confirm_leave" -> handleConfirmLeave(player, args);
+            case "cancel_join" -> handleCancelJoin(player, args);
+            case "cancel_leave" -> handleCancelLeave(player, args);
             case "set" -> handleSet(player, args);
             case "toggle" -> handleToggle(player, args);
             case "deposit" -> handleDeposit(player, args);
@@ -805,5 +809,218 @@ public class NationCommand implements CommandExecutor, TabCompleter {
         player.sendMessage("§e/nation info [nation] §7- Show nation information");
         player.sendMessage("§e/nation list [page] §7- List all nations");
     }
-}
 
+    private void handleJoin(Player player, String[] args) {
+        if (args.length < 2) {
+            player.sendMessage("§cUsage: /nation join <nation>");
+            return;
+        }
+
+        String nationName = args[1];
+        Nation nation = plugin.getNationManager().getNation(nationName);
+
+        if (nation == null) {
+            player.sendMessage("§cNation not found: " + nationName);
+            return;
+        }
+
+        TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(player.getUniqueId());
+        if (townyPlayer == null || !townyPlayer.hasTown()) {
+            player.sendMessage("§cYou must be in a town to join a nation!");
+            return;
+        }
+
+        Town playerTown = plugin.getTownManager().getTown(townyPlayer.getTownUuid());
+        if (playerTown == null || !playerTown.isMayor(player.getUniqueId())) {
+            player.sendMessage("§cYou must be the mayor of a town to join a nation!");
+            return;
+        }
+
+        if (playerTown.hasNation()) {
+            player.sendMessage("§cYour town is already part of a nation!");
+            return;
+        }
+
+        if (!nation.isOpen()) {
+            player.sendMessage("§cThis nation is not open for new towns!");
+            return;
+        }
+
+        if (!nation.canAddTown()) {
+            player.sendMessage("§cNation has reached maximum town limit!");
+            return;
+        }
+
+        // Send confirmation message with clickable buttons
+        player.sendMessage("§6=== Nation Join Confirmation ===");
+        player.sendMessage("§eYou are about to join the nation: §a" + nation.getName());
+        player.sendMessage("§eYour town: §f" + playerTown.getName());
+        player.sendMessage("§eNation tax rate: §c" + nation.getTaxRate() + "%");
+        player.sendMessage("§7This action cannot be undone easily.");
+        player.sendMessage("");
+
+        // Create clickable confirm/cancel buttons
+        net.kyori.adventure.text.Component confirmButton = net.kyori.adventure.text.Component.text("§a[CONFIRM]")
+                .clickEvent(net.kyori.adventure.text.event.ClickEvent.runCommand("/nation confirm_join " + nation.getName()))
+                .hoverEvent(net.kyori.adventure.text.event.HoverEvent.showText(
+                        net.kyori.adventure.text.Component.text("§aClick to confirm joining the nation")));
+
+        net.kyori.adventure.text.Component cancelButton = net.kyori.adventure.text.Component.text("§c[CANCEL]")
+                .clickEvent(net.kyori.adventure.text.event.ClickEvent.runCommand("/nation cancel_join"))
+                .hoverEvent(net.kyori.adventure.text.event.HoverEvent.showText(
+                        net.kyori.adventure.text.Component.text("§cClick to cancel")));
+
+        net.kyori.adventure.text.Component message = confirmButton
+                .append(net.kyori.adventure.text.Component.text("§7   "))
+                .append(cancelButton);
+
+        player.sendMessage(message);
+        player.sendMessage("§7Or use: §e/nation confirm_join " + nation.getName() + "§7 or §e/nation cancel_join");
+    }
+
+    private void handleLeave(Player player, String[] args) {
+        TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(player.getUniqueId());
+        if (townyPlayer == null || !townyPlayer.hasNation()) {
+            player.sendMessage(plugin.getConfigManager().getMessage("nation.not-in-nation"));
+            return;
+        }
+
+        if (!townyPlayer.hasTown()) {
+            player.sendMessage("§cYou must be in a town to leave a nation!");
+            return;
+        }
+
+        Town playerTown = plugin.getTownManager().getTown(townyPlayer.getTownUuid());
+        if (playerTown == null || !playerTown.isMayor(player.getUniqueId())) {
+            player.sendMessage("§cYou must be the mayor of a town to leave a nation!");
+            return;
+        }
+
+        Nation nation = plugin.getNationManager().getNation(townyPlayer.getNationUuid());
+        if (nation == null) {
+            player.sendMessage(plugin.getConfigManager().getMessage("general.error"));
+            return;
+        }
+
+        if (nation.isCapitalTown(playerTown.getUuid())) {
+            player.sendMessage("§cThe capital town cannot leave the nation! Transfer capital first or disband the nation.");
+            return;
+        }
+
+        // Send confirmation message with clickable buttons
+        player.sendMessage("§6=== Nation Leave Confirmation ===");
+        player.sendMessage("§eYou are about to leave the nation: §c" + nation.getName());
+        player.sendMessage("§eYour town: §f" + playerTown.getName());
+        player.sendMessage("§c§lWARNING: §cThis will remove your town from the nation!");
+        player.sendMessage("§7You will lose nation benefits and protection.");
+        player.sendMessage("");
+
+        // Create clickable confirm/cancel buttons
+        net.kyori.adventure.text.Component confirmButton = net.kyori.adventure.text.Component.text("§c[CONFIRM LEAVE]")
+                .clickEvent(net.kyori.adventure.text.event.ClickEvent.runCommand("/nation confirm_leave"))
+                .hoverEvent(net.kyori.adventure.text.event.HoverEvent.showText(
+                        net.kyori.adventure.text.Component.text("§cClick to confirm leaving the nation")));
+
+        net.kyori.adventure.text.Component cancelButton = net.kyori.adventure.text.Component.text("§a[CANCEL]")
+                .clickEvent(net.kyori.adventure.text.event.ClickEvent.runCommand("/nation cancel_leave"))
+                .hoverEvent(net.kyori.adventure.text.event.HoverEvent.showText(
+                        net.kyori.adventure.text.Component.text("§aClick to cancel and stay in nation")));
+
+        net.kyori.adventure.text.Component message = confirmButton
+                .append(net.kyori.adventure.text.Component.text("§7   "))
+                .append(cancelButton);
+
+        player.sendMessage(message);
+        player.sendMessage("§7Or use: §e/nation confirm_leave§7 or §e/nation cancel_leave");
+    }
+
+    private void handleConfirmJoin(Player player, String[] args) {
+        if (args.length < 2) {
+            player.sendMessage("§cInvalid confirmation command.");
+            return;
+        }
+
+        String nationName = args[1];
+        Nation nation = plugin.getNationManager().getNation(nationName);
+
+        if (nation == null) {
+            player.sendMessage("§cNation not found: " + nationName);
+            return;
+        }
+
+        TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(player.getUniqueId());
+        if (townyPlayer == null || !townyPlayer.hasTown()) {
+            player.sendMessage("§cYou must be in a town to join a nation!");
+            return;
+        }
+
+        Town playerTown = plugin.getTownManager().getTown(townyPlayer.getTownUuid());
+        if (playerTown == null || !playerTown.isMayor(player.getUniqueId())) {
+            player.sendMessage("§cYou must be the mayor of a town to join a nation!");
+            return;
+        }
+
+        if (playerTown.hasNation()) {
+            player.sendMessage("§cYour town is already part of a nation!");
+            return;
+        }
+
+        plugin.getNationManager().addTownToNation(nation.getUuid(), playerTown.getUuid())
+                .thenAccept(success -> {
+                    if (success) {
+                        player.sendMessage("§a✓ Your town " + playerTown.getName() + " has successfully joined the nation " + nation.getName() + "!");
+
+                        // Notify nation king
+                        Player king = plugin.getServer().getPlayer(nation.getKingUuid());
+                        if (king != null) {
+                            king.sendMessage("§a" + playerTown.getName() + " has joined your nation!");
+                        }
+                    } else {
+                        player.sendMessage("§cFailed to join nation. The nation may be full or there was an error.");
+                    }
+                });
+    }
+
+    private void handleConfirmLeave(Player player, String[] args) {
+        TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(player.getUniqueId());
+        if (townyPlayer == null || !townyPlayer.hasNation()) {
+            player.sendMessage(plugin.getConfigManager().getMessage("nation.not-in-nation"));
+            return;
+        }
+
+        Town playerTown = plugin.getTownManager().getTown(townyPlayer.getTownUuid());
+        if (playerTown == null || !playerTown.isMayor(player.getUniqueId())) {
+            player.sendMessage("§cYou must be the mayor of a town to leave a nation!");
+            return;
+        }
+
+        Nation nation = plugin.getNationManager().getNation(townyPlayer.getNationUuid());
+        if (nation == null) {
+            player.sendMessage(plugin.getConfigManager().getMessage("general.error"));
+            return;
+        }
+
+        plugin.getNationManager().removeTownFromNation(nation.getUuid(), playerTown.getUuid())
+                .thenAccept(success -> {
+                    if (success) {
+                        player.sendMessage("§c✓ Your town " + playerTown.getName() + " has left the nation " + nation.getName() + ".");
+
+                        // Notify nation king
+                        Player king = plugin.getServer().getPlayer(nation.getKingUuid());
+                        if (king != null) {
+                            king.sendMessage("§c" + playerTown.getName() + " has left your nation.");
+                        }
+                    } else {
+                        player.sendMessage("§cFailed to leave nation.");
+                    }
+                });
+    }
+
+    private void handleCancelJoin(Player player, String[] args) {
+        player.sendMessage("§7Nation join cancelled.");
+    }
+
+    private void handleCancelLeave(Player player, String[] args) {
+        player.sendMessage("§7Nation leave cancelled. You remain in the nation.");
+    }
+}

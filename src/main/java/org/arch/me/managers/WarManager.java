@@ -140,6 +140,16 @@ public class WarManager {
                     return null;
                 }
 
+                // Check minimum online players requirement (2+ per side)
+                int declaringOnline = getOnlinePlayerCount(declaringNation);
+                int defendingOnline = getOnlinePlayerCount(defendingNation);
+
+                if (declaringOnline < 2 || defendingOnline < 2) {
+                    plugin.getLogger().info("War declaration failed: Insufficient online players. " +
+                        "Declaring: " + declaringOnline + "/2, Defending: " + defendingOnline + "/2");
+                    return null;
+                }
+
                 // Check if declaring nation has enough funds for war
                 BigDecimal warCost = BigDecimal.valueOf(plugin.getConfig().getDouble("war.declaration-cost", 10000.0));
                 if (!plugin.getEconomyManager().hasNationBalance(declaringNationUuid, warCost)) {
@@ -441,28 +451,40 @@ public class WarManager {
         UUID chunkNationUuid = getChunkNationUuid(chunk);
         if (chunkNationUuid == null) return;
 
-        // Check if player is enemy of chunk nation
-        if (war.areEnemies(playerNationUuid, chunkNationUuid)) {
-            war.addPlayerToCapitalChunk(player.getUniqueId());
-            playersInCapitalChunks.add(player.getUniqueId());
-
-            // Enhanced capitulation mechanics
-            if (!war.isCapitulationInProgress()) {
-                war.startCapitulation();
-                saveWar(war);
-
-                // Broadcast dramatic start message
-                broadcastCapitulationStart(war, chunk);
-
-                // Give attacker bonus effects in capital chunk
-                applyCapitalChunkEffects(player, true);
-            } else {
-                player.sendMessage("§c⚔ CAPITULATION IN PROGRESS! Time remaining: " + war.getFormattedTimeRemaining());
-                applyCapitalChunkEffects(player, true);
-            }
-
-            saveWar(war);
+        // FIXED: Kendi town/nation'ında olunca kapitülasyon başlamasın
+        if (playerNationUuid.equals(chunkNationUuid)) {
+            return; // Kendi ülkesinin başkentindeyse hiçbir şey yapma
         }
+
+        // FIXED: Sadece düşman uluslar arasında kapitülasyon olsun
+        if (!war.areEnemies(playerNationUuid, chunkNationUuid)) {
+            return; // Müttefik veya nötr uluslarla kapitülasyon yok
+        }
+
+        // FIXED: Oyuncu gerçekten savaşta mı kontrol et
+        if (!war.isParticipant(playerNationUuid)) {
+            return; // Savaşta olmayan oyuncular kapitülasyon başlatamaz
+        }
+
+        war.addPlayerToCapitalChunk(player.getUniqueId());
+        playersInCapitalChunks.add(player.getUniqueId());
+
+        // Enhanced capitulation mechanics
+        if (!war.isCapitulationInProgress()) {
+            war.startCapitulation();
+            saveWar(war);
+
+            // Broadcast dramatic start message
+            broadcastCapitulationStart(war, chunk);
+
+            // Give attacker bonus effects in capital chunk
+            applyCapitalChunkEffects(player, true);
+        } else {
+            player.sendMessage("§c⚔ CAPITULATION IN PROGRESS! Time remaining: " + war.getFormattedTimeRemaining());
+            applyCapitalChunkEffects(player, true);
+        }
+
+        saveWar(war);
     }
 
     public void handlePlayerLeaveCapitalChunk(Player player, ClaimedChunk chunk) {
@@ -474,19 +496,28 @@ public class WarManager {
         War war = getActiveWarForNation(playerNationUuid);
         if (war == null) return;
 
-        war.removePlayerFromCapitalChunk(player.getUniqueId());
-        playersInCapitalChunks.remove(player.getUniqueId());
+        UUID chunkNationUuid = getChunkNationUuid(chunk);
+        if (chunkNationUuid == null) return;
 
-        // Remove effects
-        applyCapitalChunkEffects(player, false);
+        // FIXED: Kendi ülkesinde değilse ve savaşta ise
+        if (!playerNationUuid.equals(chunkNationUuid) &&
+            war.areEnemies(playerNationUuid, chunkNationUuid) &&
+            war.isParticipant(playerNationUuid)) {
 
-        if (war.getPlayersInCapitalChunk().isEmpty()) {
-            war.stopCapitulation();
-            player.sendMessage("§a⚔ Capitulation stopped - no enemy players in capital!");
-            broadcastCapitulationStop(war);
+            war.removePlayerFromCapitalChunk(player.getUniqueId());
+            playersInCapitalChunks.remove(player.getUniqueId());
+
+            // Remove effects
+            applyCapitalChunkEffects(player, false);
+
+            if (war.getPlayersInCapitalChunk().isEmpty()) {
+                war.stopCapitulation();
+                player.sendMessage("§a⚔ Capitulation stopped - no enemy players in capital!");
+                broadcastCapitulationStop(war);
+            }
+
+            saveWar(war);
         }
-
-        saveWar(war);
     }
 
     /**
@@ -995,6 +1026,22 @@ public class WarManager {
         }
 
         return !areNationsAtWar(chunkNationUuid, playerNationUuid);
+    }
+
+    private int getOnlinePlayerCount(Nation nation) {
+        int onlineCount = 0;
+        for (UUID townUuid : nation.getTowns()) {
+            Town town = plugin.getTownManager().getTown(townUuid);
+            if (town != null) {
+                for (UUID residentUuid : town.getResidents()) {
+                    Player player = Bukkit.getPlayer(residentUuid);
+                    if (player != null && player.isOnline()) {
+                        onlineCount++;
+                    }
+                }
+            }
+        }
+        return onlineCount;
     }
 }
 
