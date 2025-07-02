@@ -9,6 +9,7 @@ import org.bukkit.scheduler.BukkitTask;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -118,7 +119,7 @@ public class BufferZoneManager {
                     zone.getX2(),
                     zone.getZ2(),
                     zone.getCreatedBy().toString(),
-                    zone.getCreatedAt(),
+                    new Timestamp(zone.getCreatedAt()),
                     serializeFlags(zone.getFlags()),
                     zone.getReason()
                 );

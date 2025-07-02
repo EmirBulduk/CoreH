@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 public class DatabaseManager {
@@ -113,6 +114,7 @@ public class DatabaseManager {
             tax_rate DECIMAL(5,2) DEFAULT 0.00,
             upkeep_cost DECIMAL(15,2) DEFAULT 0.00,
             max_residents INT DEFAULT 20,
+            max_chunks INT DEFAULT 50,
             is_open BIT DEFAULT 1,
             is_public BIT DEFAULT 0,
             board NTEXT,
@@ -163,6 +165,7 @@ public class DatabaseManager {
         IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='%schunks' AND xtype='U')
         CREATE TABLE %schunks (
             id BIGINT IDENTITY(1,1) PRIMARY KEY,
+            uuid NVARCHAR(36) NOT NULL,
             world NVARCHAR(32) NOT NULL,
             x INT NOT NULL,
             z INT NOT NULL,
@@ -189,7 +192,10 @@ public class DatabaseManager {
         IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='%sranks' AND xtype='U')
         CREATE TABLE %sranks (
             id INT IDENTITY(1,1) PRIMARY KEY,
+            uuid NVARCHAR(36) NOT NULL,
             name NVARCHAR(32) NOT NULL,
+            display_name NVARCHAR(64),
+            type NVARCHAR(16) NOT NULL,
             prefix NVARCHAR(16),
             suffix NVARCHAR(16),
             permissions NTEXT,
@@ -201,6 +207,24 @@ public class DatabaseManager {
 
         executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_ranks_name') " +
                 "CREATE INDEX idx_ranks_name ON %sranks(name)".formatted(tablePrefix));
+
+        // Player ranks table - to store which rank each player has
+        executeUpdate("""
+        IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='%splayer_ranks' AND xtype='U')
+        CREATE TABLE %splayer_ranks (
+            id BIGINT IDENTITY(1,1) PRIMARY KEY,
+            player_uuid NVARCHAR(36) NOT NULL,
+            rank_uuid NVARCHAR(36) NOT NULL,
+            assigned_date DATETIME2 DEFAULT GETDATE(),
+            assigned_by NVARCHAR(36),
+            CONSTRAINT unique_player_rank UNIQUE (player_uuid)
+        )
+        """.formatted(tablePrefix, tablePrefix));
+
+        executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_player_ranks_player') " +
+                "CREATE INDEX idx_player_ranks_player ON %splayer_ranks(player_uuid)".formatted(tablePrefix));
+        executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_player_ranks_rank') " +
+                "CREATE INDEX idx_player_ranks_rank ON %splayer_ranks(rank_uuid)".formatted(tablePrefix));
 
         executeUpdate("""
         IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='%stransactions' AND xtype='U')
@@ -282,25 +306,60 @@ public class DatabaseManager {
         executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_war_towns_town') " +
                 "CREATE INDEX idx_war_towns_town ON %swar_towns(town_uuid)".formatted(tablePrefix));
 
+        // Buffer zones table
+        executeUpdate("""
+        IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='%sbuffer_zones' AND xtype='U')
+        CREATE TABLE %sbuffer_zones (
+            uuid NVARCHAR(36) PRIMARY KEY,
+            name NVARCHAR(64) NOT NULL,
+            world_name NVARCHAR(32) NOT NULL,
+            x1 INT NOT NULL,
+            z1 INT NOT NULL,
+            x2 INT NOT NULL,
+            z2 INT NOT NULL,
+            created_by NVARCHAR(36) NOT NULL,
+            created_at DATETIME2 DEFAULT GETDATE(),
+            flags NTEXT,
+            reason NTEXT
+        )
+        """.formatted(tablePrefix, tablePrefix));
+
+        executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_buffer_zones_world') " +
+                "CREATE INDEX idx_buffer_zones_world ON %sbuffer_zones(world_name)".formatted(tablePrefix));
+        executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_buffer_zones_creator') " +
+                "CREATE INDEX idx_buffer_zones_creator ON %sbuffer_zones(created_by)".formatted(tablePrefix));
+        executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_buffer_zones_name') " +
+                "CREATE INDEX idx_buffer_zones_name ON %sbuffer_zones(name)".formatted(tablePrefix));
+
         // Insert default ranks
         insertDefaultRanks();
     }
 
     private void insertDefaultRanks() throws SQLException {
         String checkRank = "SELECT COUNT(*) FROM %sranks WHERE name = ?".formatted(tablePrefix);
-        String insertRank = "INSERT INTO %sranks (name, prefix, permissions, priority, is_default) VALUES (?, ?, ?, ?, ?)".formatted(tablePrefix);
+        String insertRank = "INSERT INTO %sranks (uuid, name, prefix, permissions, priority, is_default, type, display_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)".formatted(tablePrefix);
 
         String[][] defaultRanks = {
-                {"Resident", "[R]", "towny.resident", "1", "1"}, // Changed to 1 for BIT type
-                {"VIP", "[VIP]", "towny.resident,towny.vip", "2", "0"},
-                {"Councillor", "[C]", "towny.resident,towny.councillor", "3", "0"},
-                {"Mayor", "[M]", "towny.resident,towny.mayor", "4", "0"},
-                {"King", "[K]", "towny.resident,towny.king", "5", "0"}
+                {"Resident", "[R]", "towny.resident", "1", "1", "TOWN"}, // Changed to 1 for BIT type
+                {"VIP", "[VIP]", "towny.resident,towny.vip", "2", "0", "TOWN"},
+                {"Councillor", "[C]", "towny.resident,towny.councillor", "3", "0", "TOWN"},
+                {"Mayor", "[M]", "towny.resident,towny.mayor", "4", "0", "TOWN"},
+                {"King", "[K]", "towny.resident,towny.king", "5", "0", "NATION"}
         };
 
         for (String[] rank : defaultRanks) {
             if (queryInt(checkRank, rank[0]) == 0) {
-                executeUpdate(insertRank, rank[0], rank[1], rank[2], Integer.parseInt(rank[3]), Integer.parseInt(rank[4])); // Changed to int for BIT
+                UUID rankUuid = UUID.randomUUID();
+                executeUpdate(insertRank,
+                    rankUuid.toString(),
+                    rank[0], // name
+                    rank[1], // prefix
+                    rank[2], // permissions
+                    Integer.parseInt(rank[3]), // priority
+                    Integer.parseInt(rank[4]), // is_default
+                    rank[5], // type
+                    rank[0] // display_name (same as name)
+                );
             }
         }
     }
@@ -332,6 +391,18 @@ public class DatabaseManager {
             }
 
             stmt.executeUpdate();
+        }
+    }
+
+    public int executeUpdateWithResult(String sql, Object... params) throws SQLException {
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            for (int i = 0; i < params.length; i++) {
+                stmt.setObject(i + 1, params[i]);
+            }
+
+            return stmt.executeUpdate();
         }
     }
 

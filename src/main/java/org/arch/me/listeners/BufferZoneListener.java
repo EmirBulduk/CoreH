@@ -69,9 +69,18 @@ public class BufferZoneListener implements Listener {
         BufferZone zone = plugin.getBufferZoneManager().getBufferZoneAtLocation(event.getLocation());
         if (zone != null && !zone.getFlag("mob_spawning")) {
             // Cancel natural mob spawning in buffer zones
-            if (event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.NATURAL ||
-                event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.SPAWNER ||
-                event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.CHUNK_GEN) {
+            CreatureSpawnEvent.SpawnReason reason = event.getSpawnReason();
+
+            // Always cancel these common spawn reasons
+            if (reason == CreatureSpawnEvent.SpawnReason.NATURAL ||
+                reason == CreatureSpawnEvent.SpawnReason.SPAWNER) {
+                event.setCancelled(true);
+                return;
+            }
+
+            // Handle version-specific spawn reasons using reflection
+            String reasonName = reason.name();
+            if ("CHUNK_GEN".equals(reasonName) || "WORLD_GENERATION".equals(reasonName)) {
                 event.setCancelled(true);
             }
         }

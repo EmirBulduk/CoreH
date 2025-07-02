@@ -90,10 +90,24 @@ public class RankManager {
     public CompletableFuture<Boolean> setPlayerRank(UUID playerUuid, UUID rankUuid) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                String sql = """
-                    INSERT INTO %splayer_ranks (player_uuid, rank_uuid) VALUES (?, ?)
-                    ON DUPLICATE KEY UPDATE rank_uuid = VALUES(rank_uuid)
-                """.formatted(plugin.getDatabaseManager().getTablePrefix());
+                String sql;
+                if (plugin.getDatabaseManager().isSQLServer()) {
+                    sql = """
+                        MERGE %splayer_ranks AS target
+                        USING (VALUES (?, ?)) AS source (player_uuid, rank_uuid)
+                        ON target.player_uuid = source.player_uuid
+                        WHEN MATCHED THEN
+                            UPDATE SET rank_uuid = source.rank_uuid, assigned_date = GETDATE()
+                        WHEN NOT MATCHED THEN
+                            INSERT (player_uuid, rank_uuid, assigned_date)
+                            VALUES (source.player_uuid, source.rank_uuid, GETDATE());
+                        """.formatted(plugin.getDatabaseManager().getTablePrefix());
+                } else {
+                    sql = """
+                        INSERT INTO %splayer_ranks (player_uuid, rank_uuid) VALUES (?, ?)
+                        ON DUPLICATE KEY UPDATE rank_uuid = VALUES(rank_uuid)
+                        """.formatted(plugin.getDatabaseManager().getTablePrefix());
+                }
 
                 plugin.getDatabaseManager().executeUpdate(sql, playerUuid.toString(), rankUuid.toString());
                 playerRanks.put(playerUuid, rankUuid);
@@ -157,23 +171,82 @@ public class RankManager {
 
     public void saveRank(Rank rank) {
         try {
-            String sql = """
-                INSERT INTO %sranks (uuid, name, display_name, priority, permissions, is_default, type)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE
-                name = VALUES(name), display_name = VALUES(display_name), priority = VALUES(priority),
-                permissions = VALUES(permissions), is_default = VALUES(is_default), type = VALUES(type)
-            """.formatted(plugin.getDatabaseManager().getTablePrefix());
+            // Check if the table has the new UUID column structure
+            String checkColumnSql = "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '%sranks' AND COLUMN_NAME = 'uuid'".formatted(plugin.getDatabaseManager().getTablePrefix());
 
-            plugin.getDatabaseManager().executeUpdate(sql,
-                rank.getUuid().toString(),
-                rank.getName(),
-                rank.getDisplayName(),
-                rank.getPriority(),
-                String.join(",", rank.getPermissions()),
-                rank.isDefault(),
-                rank.getType()
-            );
+            boolean hasUuidColumn = false;
+            try {
+                String result = plugin.getDatabaseManager().queryString(checkColumnSql);
+                hasUuidColumn = (result != null);
+            } catch (SQLException e) {
+                // Column check failed, assume old structure
+                hasUuidColumn = false;
+            }
+
+            String sql;
+            if (hasUuidColumn) {
+                // Use new structure with UUID
+                if (plugin.getDatabaseManager().isSQLServer()) {
+                    sql = """
+                        MERGE %sranks AS target
+                        USING (VALUES (?, ?, ?, ?, ?, ?, ?)) AS source (uuid, name, display_name, priority, permissions, is_default, type)
+                        ON target.uuid = source.uuid
+                        WHEN MATCHED THEN
+                            UPDATE SET name = source.name, display_name = source.display_name, priority = source.priority,
+                                       permissions = source.permissions, is_default = source.is_default, type = source.type
+                        WHEN NOT MATCHED THEN
+                            INSERT (uuid, name, display_name, priority, permissions, is_default, type)
+                            VALUES (source.uuid, source.name, source.display_name, source.priority, source.permissions, source.is_default, source.type);
+                        """.formatted(plugin.getDatabaseManager().getTablePrefix());
+                } else {
+                    sql = """
+                        INSERT INTO %sranks (uuid, name, display_name, priority, permissions, is_default, type)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ON DUPLICATE KEY UPDATE
+                        name = VALUES(name), display_name = VALUES(display_name), priority = VALUES(priority),
+                        permissions = VALUES(permissions), is_default = VALUES(is_default), type = VALUES(type)
+                        """.formatted(plugin.getDatabaseManager().getTablePrefix());
+                }
+
+                plugin.getDatabaseManager().executeUpdate(sql,
+                    rank.getUuid().toString(),
+                    rank.getName(),
+                    rank.getDisplayName(),
+                    rank.getPriority(),
+                    String.join(",", rank.getPermissions()),
+                    rank.isDefault(),
+                    rank.getType()
+                );
+            } else {
+                // Use old structure without UUID (fallback for compatibility)
+                if (plugin.getDatabaseManager().isSQLServer()) {
+                    sql = """
+                        MERGE %sranks AS target
+                        USING (VALUES (?, ?, ?, ?, ?)) AS source (name, priority, permissions, is_default, prefix)
+                        ON target.name = source.name
+                        WHEN MATCHED THEN
+                            UPDATE SET priority = source.priority, permissions = source.permissions, is_default = source.is_default, prefix = source.prefix
+                        WHEN NOT MATCHED THEN
+                            INSERT (name, priority, permissions, is_default, prefix)
+                            VALUES (source.name, source.priority, source.permissions, source.is_default, source.prefix);
+                        """.formatted(plugin.getDatabaseManager().getTablePrefix());
+                } else {
+                    sql = """
+                        INSERT INTO %sranks (name, priority, permissions, is_default, prefix)
+                        VALUES (?, ?, ?, ?, ?)
+                        ON DUPLICATE KEY UPDATE
+                        priority = VALUES(priority), permissions = VALUES(permissions), is_default = VALUES(is_default), prefix = VALUES(prefix)
+                        """.formatted(plugin.getDatabaseManager().getTablePrefix());
+                }
+
+                plugin.getDatabaseManager().executeUpdate(sql,
+                    rank.getName(),
+                    rank.getPriority(),
+                    String.join(",", rank.getPermissions()),
+                    rank.isDefault(),
+                    "[" + rank.getName().substring(0, 1).toUpperCase() + "]" // Generate a simple prefix
+                );
+            }
 
         } catch (SQLException e) {
             plugin.getLogger().severe("Failed to save rank: " + e.getMessage());
@@ -182,13 +255,37 @@ public class RankManager {
     }
 
     private Rank createRankFromResultSet(ResultSet rs) throws SQLException {
-        UUID uuid = UUID.fromString(rs.getString("uuid"));
+        // First check if uuid column exists, if not use ID-based approach
+        UUID uuid;
+        try {
+            String uuidStr = rs.getString("uuid");
+            uuid = uuidStr != null ? UUID.fromString(uuidStr) : UUID.randomUUID();
+        } catch (SQLException e) {
+            // UUID column doesn't exist, generate new UUID
+            uuid = UUID.randomUUID();
+        }
+
         String name = rs.getString("name");
-        String type = rs.getString("type");
+
+        // Check if type column exists
+        String type;
+        try {
+            type = rs.getString("type");
+            if (type == null) type = "TOWN"; // Default type
+        } catch (SQLException e) {
+            type = "TOWN"; // Default type if column doesn't exist
+        }
 
         Rank rank = new Rank(uuid, name, type);
         rank.setId(rs.getInt("id")); // Set the database ID
-        rank.setDisplayName(rs.getString("display_name"));
+
+        // Check if display_name column exists
+        try {
+            rank.setDisplayName(rs.getString("display_name"));
+        } catch (SQLException e) {
+            rank.setDisplayName(name); // Use name as display name if column doesn't exist
+        }
+
         rank.setPriority(rs.getInt("priority"));
         rank.setDefault(rs.getBoolean("is_default"));
 

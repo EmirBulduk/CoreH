@@ -65,10 +65,17 @@ public class TownManager {
 
                 // Handle max_chunks with fallback for existing towns
                 try {
-                    town.setMaxChunks(rs.getInt("max_chunks"));
+                    int maxChunks = rs.getInt("max_chunks");
+                    if (maxChunks == 0) {
+                        maxChunks = 50; // Default value for existing towns
+                        // Update database to fix 0 values
+                        fixMaxChunksForTown(town.getUuid(), maxChunks);
+                    }
+                    town.setMaxChunks(maxChunks);
                 } catch (SQLException e) {
                     // Column doesn't exist or is null, set default value
                     town.setMaxChunks(50);
+                    fixMaxChunksForTown(town.getUuid(), 50);
                 }
 
                 town.setOpen(rs.getBoolean("is_open"));
@@ -98,6 +105,17 @@ public class TownManager {
         } catch (SQLException e) {
             plugin.getLogger().severe("Failed to load towns: " + e.getMessage());
             e.printStackTrace();
+        }
+    }
+
+    private void fixMaxChunksForTown(UUID townUuid, int maxChunks) {
+        try {
+            DatabaseManager db = plugin.getDatabaseManager();
+            String sql = "UPDATE %stowns SET max_chunks = ? WHERE uuid = ?".formatted(db.getTablePrefix());
+            db.executeUpdate(sql, maxChunks, townUuid.toString());
+            plugin.getLogger().info("Fixed max_chunks value for town: " + townUuid + " to " + maxChunks);
+        } catch (SQLException e) {
+            plugin.getLogger().warning("Failed to fix max_chunks for town " + townUuid + ": " + e.getMessage());
         }
     }
 
@@ -187,8 +205,8 @@ public class TownManager {
 
                 // Check economy requirements
                 BigDecimal townCreationCost = BigDecimal.valueOf(plugin.getConfigManager().getEconomyValue("town-creation-cost"));
-                BigDecimal chunkClaimCost = BigDecimal.valueOf(plugin.getConfigManager().getEconomyValue("chunk-claim-cost"));
-                BigDecimal totalCost = townCreationCost.add(chunkClaimCost);
+                // Remove chunk claim cost since initial chunk is free
+                BigDecimal totalCost = townCreationCost;
 
                 if (!plugin.getEconomyManager().hasPlayerBalance(mayorUuid, totalCost)) {
                     plugin.getLogger().info("Town creation failed: Insufficient funds. Required: " + totalCost);
@@ -200,7 +218,7 @@ public class TownManager {
                 Town town = new Town(townUuid, name, mayorUuid);
                 town.setSpawn(spawn);
 
-                // Withdraw money for both town creation and initial chunk claim
+                // Withdraw money for town creation only (initial chunk is free)
                 plugin.getEconomyManager().withdrawPlayer(mayorUuid, totalCost);
 
                 // Save town to database first
@@ -378,8 +396,8 @@ public class TownManager {
             if (db.isSQLServer()) {
                 sql = """
                     MERGE INTO %stowns AS target
-                    USING (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)) AS source 
-                    (uuid, name, mayor_uuid, nation_uuid, spawn_world, spawn_x, spawn_y, spawn_z, spawn_yaw, spawn_pitch, founded, balance, tax_rate, upkeep_cost, max_residents, is_open, is_public, board, permissions, flags, metadata)
+                    USING (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)) AS source 
+                    (uuid, name, mayor_uuid, nation_uuid, spawn_world, spawn_x, spawn_y, spawn_z, spawn_yaw, spawn_pitch, founded, balance, tax_rate, upkeep_cost, max_residents, max_chunks, is_open, is_public, board, permissions, flags, metadata)
                     ON target.uuid = source.uuid
                     WHEN MATCHED THEN
                         UPDATE SET
@@ -396,6 +414,7 @@ public class TownManager {
                             tax_rate = source.tax_rate,
                             upkeep_cost = source.upkeep_cost,
                             max_residents = source.max_residents,
+                            max_chunks = source.max_chunks,
                             is_open = source.is_open,
                             is_public = source.is_public,
                             board = source.board,
@@ -403,21 +422,21 @@ public class TownManager {
                             flags = source.flags,
                             metadata = source.metadata
                     WHEN NOT MATCHED THEN
-                        INSERT (uuid, name, mayor_uuid, nation_uuid, spawn_world, spawn_x, spawn_y, spawn_z, spawn_yaw, spawn_pitch, founded, balance, tax_rate, upkeep_cost, max_residents, is_open, is_public, board, permissions, flags, metadata)
-                        VALUES (source.uuid, source.name, source.mayor_uuid, source.nation_uuid, source.spawn_world, source.spawn_x, source.spawn_y, source.spawn_z, source.spawn_yaw, source.spawn_pitch, source.founded, source.balance, source.tax_rate, source.upkeep_cost, source.max_residents, source.is_open, source.is_public, source.board, source.permissions, source.flags, source.metadata);
+                        INSERT (uuid, name, mayor_uuid, nation_uuid, spawn_world, spawn_x, spawn_y, spawn_z, spawn_yaw, spawn_pitch, founded, balance, tax_rate, upkeep_cost, max_residents, max_chunks, is_open, is_public, board, permissions, flags, metadata)
+                        VALUES (source.uuid, source.name, source.mayor_uuid, source.nation_uuid, source.spawn_world, source.spawn_x, source.spawn_y, source.spawn_z, source.spawn_yaw, source.spawn_pitch, source.founded, source.balance, source.tax_rate, source.upkeep_cost, source.max_residents, source.max_chunks, source.is_open, source.is_public, source.board, source.permissions, source.flags, source.metadata);
                     """.formatted(db.getTablePrefix());
             } else {
                 sql = """
                     INSERT INTO %stowns (uuid, name, mayor_uuid, nation_uuid, spawn_world, spawn_x, spawn_y, spawn_z, 
-                    spawn_yaw, spawn_pitch, founded, balance, tax_rate, upkeep_cost, max_residents, is_open, is_public, 
+                    spawn_yaw, spawn_pitch, founded, balance, tax_rate, upkeep_cost, max_residents, max_chunks, is_open, is_public, 
                     board, permissions, flags, metadata) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON DUPLICATE KEY UPDATE
                     name = VALUES(name), mayor_uuid = VALUES(mayor_uuid), nation_uuid = VALUES(nation_uuid),
                     spawn_world = VALUES(spawn_world), spawn_x = VALUES(spawn_x), spawn_y = VALUES(spawn_y),
                     spawn_z = VALUES(spawn_z), spawn_yaw = VALUES(spawn_yaw), spawn_pitch = VALUES(spawn_pitch),
                     balance = VALUES(balance), tax_rate = VALUES(tax_rate), upkeep_cost = VALUES(upkeep_cost),
-                    max_residents = VALUES(max_residents), is_open = VALUES(is_open), is_public = VALUES(is_public),
+                    max_residents = VALUES(max_residents), max_chunks = VALUES(max_chunks), is_open = VALUES(is_open), is_public = VALUES(is_public),
                     board = VALUES(board), permissions = VALUES(permissions), flags = VALUES(flags), metadata = VALUES(metadata)
                     """.formatted(db.getTablePrefix());
             }
@@ -439,6 +458,7 @@ public class TownManager {
                     town.getTaxRate().doubleValue(),
                     town.getUpkeepCost().doubleValue(),
                     town.getMaxResidents(),
+                    town.getMaxChunks(),
                     town.isOpen(),
                     town.isPublic(),
                     town.getBoard(),
