@@ -2,6 +2,7 @@ package org.arch.me.listeners;
 
 import org.arch.me.EnhancedCoreH;
 import org.arch.me.models.BufferZone;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -9,6 +10,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.CreatureSpawnEvent;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.FoodLevelChangeEvent;
 import org.bukkit.event.entity.EntityRegainHealthEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
@@ -173,6 +175,43 @@ public class BufferZoneListener implements Listener {
             player.spigot().sendMessage(ChatMessageType.ACTION_BAR, new TextComponent(""));
         } catch (Exception e) {
             // Ignore for older versions
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGH)
+    public void onEntityDamage(EntityDamageByEntityEvent event) {
+        if (event.isCancelled()) return;
+
+        Player attacker = null;
+        Player victim = null;
+
+        // Get the victim (must be a player)
+        if (!(event.getEntity() instanceof Player)) return;
+        victim = (Player) event.getEntity();
+
+        // Get the attacker (can be player or projectile)
+        Entity damager = event.getDamager();
+        if (damager instanceof Player) {
+            attacker = (Player) damager;
+        } else if (damager instanceof org.bukkit.entity.Projectile) {
+            org.bukkit.entity.Projectile projectile = (org.bukkit.entity.Projectile) damager;
+            org.bukkit.projectiles.ProjectileSource shooter = projectile.getShooter();
+            if (shooter instanceof Player) {
+                attacker = (Player) shooter;
+            }
+        }
+
+        // If no valid attacker found, ignore
+        if (attacker == null) return;
+
+        // Check buffer zones - PvP completely disabled
+        BufferZone attackerZone = plugin.getBufferZoneManager().getBufferZoneAtLocation(attacker.getLocation());
+        BufferZone victimZone = plugin.getBufferZoneManager().getBufferZoneAtLocation(victim.getLocation());
+
+        if (attackerZone != null || victimZone != null) {
+            event.setCancelled(true);
+            attacker.sendMessage("§cPvP is disabled in buffer zones!");
+            return;
         }
     }
 }

@@ -70,7 +70,9 @@ public final class EnhancedCoreH extends JavaPlugin {
 
         registerCommands();
 
-        registerListeners();
+        // Register event listeners
+        getServer().getPluginManager().registerEvents(new BufferZoneListener(this), this);
+        getServer().getPluginManager().registerEvents(new PvpListener(this), this);
 
         getLogger().info("EnhancedCoreH has been enabled successfully!");
     }

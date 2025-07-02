@@ -956,9 +956,49 @@ public class WarManager {
         return false;
     }
 
+    // Check if a town is at war
+    public boolean isAtWar(UUID townUuid) {
+        // Get the town
+        Town town = plugin.getTownManager().getTown(townUuid);
+        if (town == null || !town.hasNation()) {
+            return false; // Towns without nations cannot be at war
+        }
+
+        UUID nationUuid = town.getNationUuid();
+
+        // Check if the nation has any active wars
+        Set<Long> wars = nationWars.get(nationUuid);
+        if (wars == null || wars.isEmpty()) {
+            return false;
+        }
+
+        // Check if any of the wars are still active
+        for (Long warId : wars) {
+            War war = warCache.get(warId);
+            if (war != null && !war.isEnded()) {
+                return true; // Found an active war
+            }
+        }
+
+        return false; // No active wars found
+    }
+
+    // Check if a nation is at war
     public boolean isNationAtWar(UUID nationUuid) {
         Set<Long> wars = nationWars.get(nationUuid);
-        return wars != null && !wars.isEmpty();
+        if (wars == null || wars.isEmpty()) {
+            return false;
+        }
+
+        // Check if any of the wars are still active
+        for (Long warId : wars) {
+            War war = warCache.get(warId);
+            if (war != null && !war.isEnded()) {
+                return true; // Found an active war
+            }
+        }
+
+        return false; // No active wars found
     }
 
     public War getActiveWarForNation(UUID nationUuid) {
