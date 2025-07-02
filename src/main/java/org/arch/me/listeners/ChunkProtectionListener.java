@@ -65,7 +65,7 @@ public class ChunkProtectionListener implements Listener {
 
         if (!hasPermission(player, block.getLocation(), "destroy")) {
             event.setCancelled(true);
-            player.sendMessage(plugin.getConfigManager().getMessage("protection.cannot-destroy"));
+            player.sendMessage("§cYou cannot break blocks here!");
         }
     }
 
@@ -281,7 +281,7 @@ public class ChunkProtectionListener implements Listener {
 
         if (!hasPermission(player, event.getVehicle().getLocation(), "destroy")) {
             event.setCancelled(true);
-            player.sendMessage(plugin.getConfigManager().getMessage("protection.cannot-destroy"));
+            player.sendMessage("§cYou cannot break blocks here!");
         }
     }
 
@@ -292,7 +292,7 @@ public class ChunkProtectionListener implements Listener {
 
         if (!hasPermission(player, event.getVehicle().getLocation(), "destroy")) {
             event.setCancelled(true);
-            player.sendMessage(plugin.getConfigManager().getMessage("protection.cannot-destroy"));
+            player.sendMessage("§cYou cannot break blocks here!");
         }
     }
 
@@ -304,7 +304,7 @@ public class ChunkProtectionListener implements Listener {
 
         if (!hasPermission(player, event.getEntity().getLocation(), "destroy")) {
             event.setCancelled(true);
-            player.sendMessage(plugin.getConfigManager().getMessage("protection.cannot-destroy"));
+            player.sendMessage("§cYou cannot break blocks here!");
         }
     }
 
@@ -337,7 +337,7 @@ public class ChunkProtectionListener implements Listener {
 
         if (!hasPermission(player, block.getLocation(), "destroy")) {
             event.setCancelled(true);
-            player.sendMessage(plugin.getConfigManager().getMessage("protection.cannot-destroy"));
+            player.sendMessage("§cYou cannot break blocks here!");
         }
     }
 
@@ -394,8 +394,17 @@ public class ChunkProtectionListener implements Listener {
         }
 
         // WAR SYSTEM INTEGRATION: Check if chunks are unprotected due to war
-        if (!plugin.getWarManager().isChunkProtectedFromPlayer(chunk, player)) {
-            // During war, allow all actions between enemy nations
+        try {
+            if (!plugin.getWarManager().isChunkProtectedFromPlayer(chunk, player)) {
+                // During war, allow all actions between enemy nations
+                return true;
+            }
+        } catch (Exception e) {
+            // If war system fails, continue with normal protection
+        }
+
+        // Check if player is mayor (mayors can do anything in their town)
+        if (town.isMayor(player.getUniqueId())) {
             return true;
         }
 
@@ -409,17 +418,12 @@ public class ChunkProtectionListener implements Listener {
             return true; // Plot owners can do anything on their plot
         }
 
-        // Check if player is mayor (mayors can do anything in their town)
-        if (town.isMayor(player.getUniqueId())) {
-            return true;
-        }
-
         // Check town's public permissions for outsiders
         if (town.isPublic()) {
             return town.getFlag("outsider_" + permission);
         }
 
-        // Check plot-specific permissions for outsiders
-        return chunk.getFlag(permission);
+        // Default: deny access to outsiders
+        return false;
     }
 }
