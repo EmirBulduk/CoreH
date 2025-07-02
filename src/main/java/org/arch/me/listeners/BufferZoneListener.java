@@ -12,12 +12,21 @@ import org.bukkit.event.entity.CreatureSpawnEvent;
 import org.bukkit.event.entity.FoodLevelChangeEvent;
 import org.bukkit.event.entity.EntityRegainHealthEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
+import net.md_5.bungee.api.ChatMessageType;
+import net.md_5.bungee.api.chat.TextComponent;
+import org.bukkit.ChatColor;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
 
 public class BufferZoneListener implements Listener {
 
     private final EnhancedCoreH plugin;
+    private final Map<UUID, String> lastBufferZone = new HashMap<>();
 
     public BufferZoneListener(EnhancedCoreH plugin) {
         this.plugin = plugin;
@@ -117,6 +126,53 @@ public class BufferZoneListener implements Listener {
                 event.getRegainReason() == EntityRegainHealthEvent.RegainReason.SATIATED) {
                 event.setAmount(event.getAmount() * 2.0); // Double regeneration rate
             }
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onPlayerMove(PlayerMoveEvent event) {
+        if (event.isCancelled()) return;
+
+        Player player = event.getPlayer();
+        BufferZone zone = plugin.getBufferZoneManager().getBufferZoneAtLocation(player.getLocation());
+
+        String currentZone = zone != null ? zone.getName() : null;
+        String lastZone = lastBufferZone.get(player.getUniqueId());
+
+        // Check if player entered or left a buffer zone
+        if (!java.util.Objects.equals(currentZone, lastZone)) {
+            if (currentZone != null) {
+                // Player entered buffer zone
+                showBufferZoneActionBar(player, zone);
+                lastBufferZone.put(player.getUniqueId(), currentZone);
+            } else {
+                // Player left buffer zone
+                clearBufferZoneActionBar(player);
+                lastBufferZone.remove(player.getUniqueId());
+            }
+        } else if (currentZone != null) {
+            // Player is still in buffer zone, keep showing action bar
+            showBufferZoneActionBar(player, zone);
+        }
+    }
+
+    private void showBufferZoneActionBar(Player player, BufferZone zone) {
+        String message = ChatColor.BLUE + "★ " + ChatColor.BOLD + "UN BUFFER ZONE" + ChatColor.RESET +
+                        ChatColor.BLUE + " - " + zone.getName() + " ★";
+
+        try {
+            player.spigot().sendMessage(ChatMessageType.ACTION_BAR, new TextComponent(message));
+        } catch (Exception e) {
+            // Fallback for older versions
+            player.sendMessage(message);
+        }
+    }
+
+    private void clearBufferZoneActionBar(Player player) {
+        try {
+            player.spigot().sendMessage(ChatMessageType.ACTION_BAR, new TextComponent(""));
+        } catch (Exception e) {
+            // Ignore for older versions
         }
     }
 }
