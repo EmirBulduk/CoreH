@@ -76,16 +76,39 @@ public class TownCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
+        // Get real-time balance from EconomyManager
+        BigDecimal townBalance = plugin.getEconomyManager().getTownBalance(town.getUuid());
+
         player.sendMessage("§6=== Town Info: " + town.getName() + " ===");
         player.sendMessage("§eMayor: §f" + getMayorName(town));
         player.sendMessage("§eResidents: §f" + town.getResidentCount() + "/" + town.getMaxResidents());
-        player.sendMessage("§eChunks: §f" + town.getClaimedChunkCount());
-        player.sendMessage("§eBalance: §f" + plugin.getEconomyManager().format(town.getBalance()));
-        player.sendMessage("§eOpen: §f" + (town.isOpen() ? "Yes" : "No"));
-        player.sendMessage("§ePublic: §f" + (town.isPublic() ? "Yes" : "No"));
+        player.sendMessage("§eChunks: §f" + town.getClaimedChunkCount() + "/" + town.getMaxChunks());
+        player.sendMessage("§eBalance: §f" + plugin.getEconomyManager().format(townBalance));
+        player.sendMessage("§eTax Rate: §f" + plugin.getEconomyManager().format(town.getTaxRate()) + " per day");
+        player.sendMessage("§eUpkeep: §f" + plugin.getEconomyManager().format(town.getUpkeepCost()) + " per day");
+
+        // Display town settings
+        player.sendMessage("§6=== Town Settings ===");
+        player.sendMessage("§eOpen: §f" + (town.isOpen() ? "§aYes" : "§cNo"));
+        player.sendMessage("§ePublic: §f" + (town.isPublic() ? "§aYes" : "§cNo"));
+
+        // Display town flags
+        player.sendMessage("§6=== Town Flags ===");
+        player.sendMessage("§ePvP: §f" + (town.getFlag("pvp") ? "§aEnabled" : "§cDisabled"));
+        player.sendMessage("§eExplosions: §f" + (town.getFlag("explosions") ? "§aEnabled" : "§cDisabled"));
+        player.sendMessage("§eFire: §f" + (town.getFlag("fire") ? "§aEnabled" : "§cDisabled"));
+        player.sendMessage("§eMob Spawning: §f" + (town.getFlag("mobspawning") ? "§aEnabled" : "§cDisabled"));
+
         if (town.hasNation()) {
             player.sendMessage("§eNation: §f" + getNationName(town));
         }
+
+        if (town.getBoard() != null && !town.getBoard().isEmpty()) {
+            player.sendMessage("§eBoard: §f" + town.getBoard());
+        }
+
+        // Show founded date
+        player.sendMessage("§eFounded: §f" + town.getFounded().toString().substring(0, 10));
     }
 
     private void handleCreate(Player player, String[] args) {

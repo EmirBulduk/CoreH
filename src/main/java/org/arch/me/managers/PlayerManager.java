@@ -89,11 +89,14 @@ public class PlayerManager {
 
                 // Check if player already exists
                 if (playerExists(uuid)) {
-                    // Update name if changed
-                    TownyPlayer existing = getPlayer(uuid);
-                    if (!existing.getName().equals(name)) {
-                        existing.setName(name);
-                        savePlayer(existing);
+                    // Update name if changed and load into cache
+                    TownyPlayer existing = loadPlayer(uuid);
+                    if (existing != null) {
+                        if (!existing.getName().equals(name)) {
+                            existing.setName(name);
+                            savePlayer(existing);
+                        }
+                        playerCache.put(uuid, existing);
                     }
                     return;
                 }
@@ -106,12 +109,14 @@ public class PlayerManager {
                 Rank defaultRank = plugin.getRankManager().getDefaultRank();
                 if (defaultRank != null) {
                     player.setRankId(defaultRank.getId());
+                } else {
+                    player.setRankId(1); // Fallback rank ID
                 }
 
-                // Save to database
+                // Save to database first
                 savePlayer(player);
 
-                // Add to cache
+                // Add to cache after successful save
                 playerCache.put(uuid, player);
 
                 plugin.getLogger().info("Created new player: " + name + " (" + uuid + ")");
