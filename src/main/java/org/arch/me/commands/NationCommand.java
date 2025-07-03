@@ -43,14 +43,14 @@ public class NationCommand implements CommandExecutor, TabCompleter {
         switch (subCommand) {
             case "create", "new" -> handleCreate(player, args);
             case "delete", "disband" -> handleDelete(player, args);
-            case "invite" -> handleInvite(player, args);
+            case "invite" -> {
+                if (args.length >= 2 && (args[1].equalsIgnoreCase("accept") || args[1].equalsIgnoreCase("deny"))) {
+                    handleInviteResponse(player, args);
+                } else {
+                    handleInvite(player, args);
+                }
+            }
             case "kick" -> handleKick(player, args);
-            case "join" -> handleJoin(player, args);
-            case "leave" -> handleLeave(player, args);
-            case "confirm_join" -> handleConfirmJoin(player, args);
-            case "confirm_leave" -> handleConfirmLeave(player, args);
-            case "cancel_join" -> handleCancelJoin(player, args);
-            case "cancel_leave" -> handleCancelLeave(player, args);
             case "set" -> handleSet(player, args);
             case "toggle" -> handleToggle(player, args);
             case "deposit" -> handleDeposit(player, args);
@@ -61,6 +61,7 @@ public class NationCommand implements CommandExecutor, TabCompleter {
             case "capital" -> handleSetCapital(player, args);
             case "capitalchunk" -> handleSetCapitalChunk(player, args);
             case "rank" -> handleRank(player, args);
+            case "deputy" -> handleDeputy(player, args);
             default -> showHelp(player);
         }
 
@@ -126,8 +127,12 @@ public class NationCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
-        // Withdraw money first
-        plugin.getEconomyManager().withdrawPlayer(player.getUniqueId(), cost);
+        // Withdraw money first using consistent methods
+        var withdrawResponse = plugin.getEconomyManager().withdrawPlayer(player.getUniqueId(), cost);
+        if (!withdrawResponse.transactionSuccess()) {
+            player.sendMessage("§cFailed to withdraw money: " + withdrawResponse.errorMessage);
+            return;
+        }
 
         // Create nation
         plugin.getNationManager().createNation(nationName, player.getUniqueId(), playerTown.getUuid())
@@ -188,8 +193,8 @@ public class NationCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
-        // Check permissions - king or players with nation.invite permission
-        if (!nation.isKing(player.getUniqueId()) &&
+        // Check permissions - king, deputy, or players with nation.invite permission
+        if (!hasNationManagementPermission(nation, player.getUniqueId()) &&
             !plugin.getRankManager().playerHasPermission(player.getUniqueId(), "towny.nation.invite")) {
             player.sendMessage("§cYou don't have permission to invite towns to the nation!");
             return;
@@ -213,20 +218,79 @@ public class NationCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
-        plugin.getNationManager().addTownToNation(nation.getUuid(), town.getUuid())
+        // Check if town already has a pending invitation
+        if (plugin.getNationInvitationManager().hasActiveInvitation(town.getUuid())) {
+            player.sendMessage("§c" + town.getName() + " already has a pending nation invitation!");
+            return;
+        }
+
+        plugin.getNationInvitationManager().sendInvitation(nation.getUuid(), player.getUniqueId(), town.getUuid())
                 .thenAccept(success -> {
                     if (success) {
-                        player.sendMessage("§a" + town.getName() + " has been invited to join the nation!");
-
-                        // Notify town mayor
-                        Player mayor = plugin.getServer().getPlayer(town.getMayorUuid());
-                        if (mayor != null) {
-                            mayor.sendMessage("§aYour town " + town.getName() + " has been invited to join the nation " + nation.getName() + "!");
-                        }
+                        player.sendMessage("§aInvitation sent to " + town.getName() + "!");
+                        player.sendMessage("§7The town mayor will receive the invitation and can accept or deny it.");
                     } else {
-                        player.sendMessage("§cFailed to invite town to nation.");
+                        player.sendMessage("§cFailed to send invitation. Town may already have a pending invitation.");
                     }
                 });
+    }
+
+    private void handleInviteResponse(Player player, String[] args) {
+        if (args.length < 2) {
+            player.sendMessage("§cUsage: /nation invite <accept|deny>");
+            return;
+        }
+
+        // First, find any town where this player is the mayor
+        Town playerTown = null;
+        for (Town town : plugin.getTownManager().getAllTowns()) {
+            if (town.isMayor(player.getUniqueId())) {
+                playerTown = town;
+                break;
+            }
+        }
+
+        if (playerTown == null) {
+            player.sendMessage("§cYou must be the mayor of a town to respond to nation invitations!");
+            return;
+        }
+
+        if (playerTown.hasNation()) {
+            player.sendMessage("§cYour town is already part of a nation!");
+            return;
+        }
+
+        // Check if town has a pending invitation
+        if (!plugin.getNationInvitationManager().hasActiveInvitation(playerTown.getUuid())) {
+            player.sendMessage("§cYour town doesn't have any pending nation invitations!");
+            return;
+        }
+
+        String action = args[1].toLowerCase();
+
+        switch (action) {
+            case "accept" -> {
+                plugin.getNationInvitationManager().acceptInvitation(playerTown.getUuid())
+                        .thenAccept(success -> {
+                            if (success) {
+                                player.sendMessage("§a✓ Your town has successfully joined the nation!");
+                            } else {
+                                player.sendMessage("§cFailed to accept the invitation. The invitation may have expired or there was an error.");
+                            }
+                        });
+            }
+            case "deny" -> {
+                plugin.getNationInvitationManager().denyInvitation(playerTown.getUuid())
+                        .thenAccept(success -> {
+                            if (success) {
+                                player.sendMessage("§c✗ You have declined the nation invitation.");
+                            } else {
+                                player.sendMessage("§cFailed to decline the invitation. The invitation may have already expired.");
+                            }
+                        });
+            }
+            default -> player.sendMessage("§cUsage: /nation invite <accept|deny>");
+        }
     }
 
     private void handleKick(Player player, String[] args) {
@@ -695,10 +759,13 @@ public class NationCommand implements CommandExecutor, TabCompleter {
     }
 
     private void displayNationInfo(Player player, Nation nation) {
+        // Get real-time balance from EconomyManager
+        BigDecimal nationBalance = plugin.getEconomyManager().getNationBalance(nation.getUuid());
+
         player.sendMessage("§6=== Nation Info: " + nation.getName() + " ===");
         player.sendMessage("§eKing: §f" + getKingName(nation));
         player.sendMessage("§eTowns: §f" + nation.getTownCount() + "/" + nation.getMaxTowns());
-        player.sendMessage("§eBalance: §f" + plugin.getEconomyManager().format(nation.getBalance()));
+        player.sendMessage("§eBalance: §f" + plugin.getEconomyManager().format(nationBalance));
         player.sendMessage("§eOpen: §f" + (nation.isOpen() ? "Yes" : "No"));
         player.sendMessage("§ePublic: §f" + (nation.isPublic() ? "Yes" : "No"));
 
@@ -756,7 +823,7 @@ public class NationCommand implements CommandExecutor, TabCompleter {
             List<String> subCommands = Arrays.asList(
                     "create", "delete", "invite", "kick", "join", "leave", "rank",
                     "set", "toggle", "deposit", "withdraw", "info", "list",
-                    "king", "capital", "capitalchunk"
+                    "king", "capital", "capitalchunk", "deputy"
             );
 
             for (String sub : subCommands) {
@@ -780,6 +847,39 @@ public class NationCommand implements CommandExecutor, TabCompleter {
                     for (String action : rankActions) {
                         if (action.toLowerCase().startsWith(args[1].toLowerCase())) {
                             completions.add(action);
+                        }
+                    }
+                }
+                case "deputy" -> {
+                    List<String> deputyActions = Arrays.asList("set", "remove");
+                    for (String action : deputyActions) {
+                        if (action.toLowerCase().startsWith(args[1].toLowerCase())) {
+                            completions.add(action);
+                        }
+                    }
+                }
+            }
+        } else if (args.length == 3) {
+            String subCommand = args[0].toLowerCase();
+
+            if ("deputy".equals(subCommand)) {
+                // Show players in the nation for deputy management
+                if (sender instanceof Player player) {
+                    TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(player.getUniqueId());
+                    if (townyPlayer != null && townyPlayer.hasNation()) {
+                        Nation nation = plugin.getNationManager().getNation(townyPlayer.getNationUuid());
+                        if (nation != null) {
+                            for (UUID townUuid : nation.getTowns()) {
+                                Town town = plugin.getTownManager().getTown(townUuid);
+                                if (town != null) {
+                                    for (UUID residentUuid : town.getResidents()) {
+                                        Player resident = plugin.getServer().getPlayer(residentUuid);
+                                        if (resident != null && resident.getName().toLowerCase().startsWith(args[2].toLowerCase())) {
+                                            completions.add(resident.getName());
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1022,5 +1122,94 @@ public class NationCommand implements CommandExecutor, TabCompleter {
 
     private void handleCancelLeave(Player player, String[] args) {
         player.sendMessage("§7Nation leave cancelled. You remain in the nation.");
+    }
+
+    private void handleDeputy(Player player, String[] args) {
+        if (args.length < 3) {
+            player.sendMessage("§cUsage: /nation deputy set <player>");
+            player.sendMessage("§cUsage: /nation deputy remove <player>");
+            return;
+        }
+
+        TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(player.getUniqueId());
+        if (townyPlayer == null || !townyPlayer.hasNation()) {
+            player.sendMessage(plugin.getConfigManager().getMessage("nation.not-in-nation"));
+            return;
+        }
+
+        Nation nation = plugin.getNationManager().getNation(townyPlayer.getNationUuid());
+        if (nation == null) {
+            player.sendMessage(plugin.getConfigManager().getMessage("general.error"));
+            return;
+        }
+
+        // Check permissions - king or players with nation.deputy permission
+        if (!nation.isKing(player.getUniqueId()) &&
+            !plugin.getRankManager().playerHasPermission(player.getUniqueId(), "towny.nation.deputy")) {
+            player.sendMessage("§cYou don't have permission to manage nation deputies!");
+            return;
+        }
+
+        String action = args[1].toLowerCase();
+        String targetPlayerName = args[2];
+
+        Player targetPlayer = plugin.getServer().getPlayer(targetPlayerName);
+        if (targetPlayer == null) {
+            player.sendMessage("§cPlayer not found or not online!");
+            return;
+        }
+
+        TownyPlayer targetTownyPlayer = plugin.getPlayerManager().getPlayer(targetPlayer.getUniqueId());
+        if (targetTownyPlayer == null || !targetTownyPlayer.hasNation() ||
+            !targetTownyPlayer.getNationUuid().equals(nation.getUuid())) {
+            player.sendMessage("§cPlayer must be a citizen of this nation!");
+            return;
+        }
+
+        switch (action) {
+            case "set" -> {
+                plugin.getRankManager().setPlayerRank(targetPlayer.getUniqueId(),
+                        plugin.getRankManager().getRank("deputy").getUuid())
+                    .thenAccept(success -> {
+                        if (success) {
+                            player.sendMessage("§a" + targetPlayer.getName() + " has been promoted to deputy.");
+                            targetPlayer.sendMessage("§aYou have been promoted to deputy of the nation.");
+                        } else {
+                            player.sendMessage("§cFailed to set deputy rank.");
+                        }
+                    });
+            }
+            case "remove" -> {
+                // Check if the player is currently a deputy
+                if (!plugin.getRankManager().playerHasPermission(targetPlayer.getUniqueId(), "towny.nation.deputy")) {
+                    player.sendMessage("§cThat player is not a deputy.");
+                    return;
+                }
+
+                // Set player back to default citizen rank instead of removing rank entirely
+                var citizenRank = plugin.getRankManager().getRank("citizen");
+                if (citizenRank == null) {
+                    player.sendMessage("§cFailed to find citizen rank!");
+                    return;
+                }
+
+                plugin.getRankManager().setPlayerRank(targetPlayer.getUniqueId(), citizenRank.getUuid())
+                    .thenAccept(success -> {
+                        if (success) {
+                            player.sendMessage("§a" + targetPlayer.getName() + " has been removed from deputy and set back to citizen.");
+                            targetPlayer.sendMessage("§aYou have been removed from deputy of the nation and are now a citizen.");
+                        } else {
+                            player.sendMessage("§cFailed to remove deputy rank.");
+                        }
+                    });
+            }
+            default -> player.sendMessage("§cInvalid action. Use: set, remove");
+        }
+    }
+
+    // Helper method to check if player is king or deputy
+    private boolean hasNationManagementPermission(Nation nation, UUID playerUuid) {
+        return nation.isKing(playerUuid) ||
+               plugin.getRankManager().playerHasPermission(playerUuid, "towny.nation.deputy");
     }
 }

@@ -25,19 +25,27 @@ public class EconomyManager {
 
     public boolean setupEconomy() {
         if (plugin.getServer().getPluginManager().getPlugin("Vault") == null) {
-            return false;
+            plugin.getLogger().info("Vault plugin not found - using internal economy");
+            this.useVault = false;
+            return true; // Internal economy is always available
         }
 
         RegisteredServiceProvider<Economy> rsp = plugin.getServer().getServicesManager().getRegistration(Economy.class);
         if (rsp == null) {
-            return false;
+            plugin.getLogger().info("No economy service provider found - using internal economy");
+            this.useVault = false;
+            return true; // Internal economy is always available
         }
 
         vaultEconomy = rsp.getProvider();
-        useVault = vaultEconomy != null;
+        this.useVault = (vaultEconomy != null);
 
-        plugin.getLogger().info("Economy system " + (useVault ? "enabled" : "disabled") + "!");
-        return useVault;
+        if (useVault) {
+            plugin.getLogger().info("Economy system enabled with Vault: " + vaultEconomy.getName());
+        } else {
+            plugin.getLogger().info("Economy system enabled with internal economy");
+        }
+        return true;
     }
 
     // Player economy methods
@@ -49,12 +57,37 @@ public class EconomyManager {
 
         try {
             DatabaseManager db = plugin.getDatabaseManager();
+            // First ensure player exists in database
+            ensurePlayerExists(playerId);
+
             String sql = "SELECT balance FROM %splayers WHERE uuid = ?".formatted(db.getTablePrefix());
             Double balance = db.queryObject(sql, rs -> rs.getDouble("balance"), playerId.toString());
             return balance != null ? BigDecimal.valueOf(balance) : BigDecimal.ZERO;
         } catch (SQLException e) {
             plugin.getLogger().severe("Failed to get player balance: " + e.getMessage());
             return BigDecimal.ZERO;
+        }
+    }
+
+    // Ensure player exists in database with default balance
+    private void ensurePlayerExists(UUID playerId) {
+        try {
+            DatabaseManager db = plugin.getDatabaseManager();
+            String checkSql = "SELECT COUNT(*) FROM %splayers WHERE uuid = ?".formatted(db.getTablePrefix());
+            int count = db.queryInt(checkSql, playerId.toString());
+
+            if (count == 0) {
+                // Get player name
+                OfflinePlayer offlinePlayer = plugin.getServer().getOfflinePlayer(playerId);
+                String playerName = offlinePlayer.getName() != null ? offlinePlayer.getName() : "Unknown";
+
+                // Insert player with default balance
+                String insertSql = "INSERT INTO %splayers (uuid, name, balance) VALUES (?, ?, ?)".formatted(db.getTablePrefix());
+                db.executeUpdate(insertSql, playerId.toString(), playerName, 0.0);
+                plugin.getLogger().info("Created player record for " + playerName + " with default balance");
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Failed to ensure player exists: " + e.getMessage());
         }
     }
 

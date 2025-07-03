@@ -333,6 +333,57 @@ public class DatabaseManager {
 
         // Insert default ranks
         insertDefaultRanks();
+
+        // Create invitation tables
+        createInvitationTables();
+    }
+
+    private void createInvitationTables() throws SQLException {
+        // Town invitations table
+        executeUpdate("""
+        IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='%stown_invitations' AND xtype='U')
+        CREATE TABLE %stown_invitations (
+            id BIGINT IDENTITY(1,1) PRIMARY KEY,
+            town_uuid NVARCHAR(36) NOT NULL,
+            player_uuid NVARCHAR(36) NOT NULL,
+            inviter_uuid NVARCHAR(36) NOT NULL,
+            invited_at DATETIME2 DEFAULT GETDATE(),
+            expires_at DATETIME2 NOT NULL,
+            responded_at DATETIME2 NULL,
+            status NVARCHAR(16) DEFAULT 'PENDING',
+            CONSTRAINT unique_town_invitation UNIQUE (town_uuid, player_uuid, status)
+        )
+        """.formatted(tablePrefix, tablePrefix));
+
+        executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_town_invitations_player') " +
+                "CREATE INDEX idx_town_invitations_player ON %stown_invitations(player_uuid)".formatted(tablePrefix));
+        executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_town_invitations_town') " +
+                "CREATE INDEX idx_town_invitations_town ON %stown_invitations(town_uuid)".formatted(tablePrefix));
+        executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_town_invitations_status') " +
+                "CREATE INDEX idx_town_invitations_status ON %stown_invitations(status)".formatted(tablePrefix));
+
+        // Nation invitations table
+        executeUpdate("""
+        IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='%snation_invitations' AND xtype='U')
+        CREATE TABLE %snation_invitations (
+            id BIGINT IDENTITY(1,1) PRIMARY KEY,
+            nation_uuid NVARCHAR(36) NOT NULL,
+            town_uuid NVARCHAR(36) NOT NULL,
+            inviter_uuid NVARCHAR(36) NOT NULL,
+            invited_at DATETIME2 DEFAULT GETDATE(),
+            expires_at DATETIME2 NOT NULL,
+            responded_at DATETIME2 NULL,
+            status NVARCHAR(16) DEFAULT 'PENDING',
+            CONSTRAINT unique_nation_invitation UNIQUE (nation_uuid, town_uuid, status)
+        )
+        """.formatted(tablePrefix, tablePrefix));
+
+        executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_nation_invitations_town') " +
+                "CREATE INDEX idx_nation_invitations_town ON %snation_invitations(town_uuid)".formatted(tablePrefix));
+        executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_nation_invitations_nation') " +
+                "CREATE INDEX idx_nation_invitations_nation ON %snation_invitations(nation_uuid)".formatted(tablePrefix));
+        executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_nation_invitations_status') " +
+                "CREATE INDEX idx_nation_invitations_status ON %snation_invitations(status)".formatted(tablePrefix));
     }
 
     private void insertDefaultRanks() throws SQLException {

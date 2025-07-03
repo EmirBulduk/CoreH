@@ -44,7 +44,13 @@ public class TownCommand implements CommandExecutor, TabCompleter {
             case "delete", "disband" -> handleDelete(player, args);
             case "join" -> handleJoin(player, args);
             case "leave" -> handleLeave(player, args);
-            case "invite" -> handleInvite(player, args);
+            case "invite" -> {
+                if (args.length >= 2 && (args[1].equalsIgnoreCase("accept") || args[1].equalsIgnoreCase("deny"))) {
+                    handleInviteResponse(player, args);
+                } else {
+                    handleInvite(player, args);
+                }
+            }
             case "accept" -> handleAccept(player, args);
             case "decline" -> handleDecline(player, args);
             case "kick" -> handleKick(player, args);
@@ -148,13 +154,21 @@ public class TownCommand implements CommandExecutor, TabCompleter {
         BigDecimal chunkClaimCost = BigDecimal.valueOf(plugin.getConfigManager().getEconomyValue("chunk-claim-cost"));
         BigDecimal totalCost = townCreationCost.add(chunkClaimCost);
 
-        // Use Vault API directly for money check and withdrawal
-        if (!plugin.getEconomyManager().hasBalance(player, totalCost.doubleValue())) {
+        // Check if player has enough money using consistent methods
+        if (!plugin.getEconomyManager().hasPlayerBalance(player.getUniqueId(), totalCost)) {
             player.sendMessage("§cYou don't have enough money! Required: " +
                 plugin.getEconomyManager().format(totalCost) +
                 " (Town creation: " + plugin.getEconomyManager().format(townCreationCost) +
                 " + Initial chunk claim: " + plugin.getEconomyManager().format(chunkClaimCost) + ")" +
-                " | You have: " + plugin.getEconomyManager().format(BigDecimal.valueOf(plugin.getEconomyManager().getBalance(player))));
+                " | You have: " + plugin.getEconomyManager().format(
+                    plugin.getEconomyManager().getPlayerBalance(player.getUniqueId())));
+            return;
+        }
+
+        // Withdraw money first using consistent methods
+        var withdrawResponse = plugin.getEconomyManager().withdrawPlayer(player.getUniqueId(), totalCost);
+        if (!withdrawResponse.transactionSuccess()) {
+            player.sendMessage("§cFailed to withdraw money: " + withdrawResponse.errorMessage);
             return;
         }
 
@@ -170,12 +184,14 @@ public class TownCommand implements CommandExecutor, TabCompleter {
                             " for town creation and initial chunk claim.");
                         player.sendMessage("§aYour town's initial chunk has been automatically claimed!");
                     } else {
+                        // Refund money if town creation failed
+                        plugin.getEconomyManager().depositPlayer(player.getUniqueId(), totalCost);
                         player.sendMessage("§cFailed to create town. This could be due to:");
                         player.sendMessage("§c- Name already exists");
                         player.sendMessage("§c- Location is in a buffer zone");
                         player.sendMessage("§c- Chunk is already claimed");
                         player.sendMessage("§c- World restrictions");
-                        player.sendMessage("§cPlease try a different location or name.");
+                        player.sendMessage("§cMoney has been refunded. Please try a different location or name.");
                     }
                 });
     }
@@ -570,11 +586,14 @@ public class TownCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
+        // Get real-time balance from EconomyManager
+        BigDecimal townBalance = plugin.getEconomyManager().getTownBalance(town.getUuid());
+
         player.sendMessage("§6=== " + town.getName() + " ===");
         player.sendMessage("§eMayor: §f" + getMayorName(town));
         player.sendMessage("§eResidents (" + town.getResidentCount() + "): §f" + getResidentNames(town));
         player.sendMessage("§eChunks: §f" + town.getClaimedChunkCount());
-        player.sendMessage("§eBalance: §f" + plugin.getEconomyManager().format(town.getBalance()));
+        player.sendMessage("§eBalance: §f" + plugin.getEconomyManager().format(townBalance));
         player.sendMessage("§eTax Rate: §f" + town.getTaxRate() + "%");
         player.sendMessage("§eOpen: §f" + (town.isOpen() ? "Yes" : "No"));
         player.sendMessage("§ePublic Spawn: §f" + (town.isPublic() ? "Yes" : "No"));
@@ -995,5 +1014,51 @@ public class TownCommand implements CommandExecutor, TabCompleter {
         }
 
         return completions;
+    }
+
+    private void handleInviteResponse(Player player, String[] args) {
+        if (args.length < 2) {
+            player.sendMessage("§cUsage: /town invite <accept|deny>");
+            return;
+        }
+
+        // Check if player has a pending invitation
+        if (!plugin.getTownInvitationManager().hasActiveInvitation(player.getUniqueId())) {
+            player.sendMessage("§cYou don't have any pending town invitations!");
+            return;
+        }
+
+        // Check if player is already in a town
+        TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(player.getUniqueId());
+        if (townyPlayer != null && townyPlayer.hasTown()) {
+            player.sendMessage("§cYou are already in a town! Leave your current town first.");
+            return;
+        }
+
+        String action = args[1].toLowerCase();
+
+        switch (action) {
+            case "accept" -> {
+                plugin.getTownInvitationManager().acceptInvitation(player.getUniqueId())
+                        .thenAccept(success -> {
+                            if (success) {
+                                player.sendMessage("§a✓ You have successfully accepted the town invitation!");
+                            } else {
+                                player.sendMessage("§cFailed to accept the invitation. The invitation may have expired or there was an error.");
+                            }
+                        });
+            }
+            case "deny" -> {
+                plugin.getTownInvitationManager().denyInvitation(player.getUniqueId())
+                        .thenAccept(success -> {
+                            if (success) {
+                                player.sendMessage("§c✗ You have declined the town invitation.");
+                            } else {
+                                player.sendMessage("§cFailed to decline the invitation. The invitation may have already expired.");
+                            }
+                        });
+            }
+            default -> player.sendMessage("§cUsage: /town invite <accept|deny>");
+        }
     }
 }

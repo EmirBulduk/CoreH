@@ -1,276 +1,330 @@
 package org.arch.me.managers;
 
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.event.ClickEvent;
+import net.kyori.adventure.text.event.HoverEvent;
 import org.arch.me.EnhancedCoreH;
 import org.arch.me.models.Town;
-import org.arch.me.models.TownInvitation;
+import org.arch.me.models.TownyPlayer;
+import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
-import org.bukkit.scheduler.BukkitRunnable;
 
-import java.util.*;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Manages town invitations and responses
- */
 public class TownInvitationManager {
+
     private final EnhancedCoreH plugin;
-    private final Map<UUID, TownInvitation> activeInvitations; // inviteeUuid -> invitation
-    private final Map<UUID, Set<UUID>> playerInvitations; // inviteeUuid -> Set of invitation IDs
+    private final ConcurrentHashMap<UUID, TownInvitation> activeInvitations; // playerUuid -> invitation
 
     public TownInvitationManager(EnhancedCoreH plugin) {
         this.plugin = plugin;
         this.activeInvitations = new ConcurrentHashMap<>();
-        this.playerInvitations = new ConcurrentHashMap<>();
-
-        // Start cleanup task for expired invitations
-        startCleanupTask();
+        loadActiveInvitations();
     }
 
-    /**
-     * Send an invitation to a player to join a town
-     */
-    public CompletableFuture<Boolean> sendInvitation(UUID townUuid, UUID inviterUuid, UUID inviteeUuid) {
+    private void loadActiveInvitations() {
+        try {
+            String sql = """
+                SELECT * FROM %stown_invitations 
+                WHERE expires_at > ? AND status = 'PENDING'
+                """.formatted(plugin.getDatabaseManager().getTablePrefix());
+
+            Timestamp now = new Timestamp(System.currentTimeMillis());
+
+            var invitations = plugin.getDatabaseManager().queryList(sql, rs -> {
+                return new TownInvitation(
+                    UUID.fromString(rs.getString("town_uuid")),
+                    UUID.fromString(rs.getString("player_uuid")),
+                    UUID.fromString(rs.getString("inviter_uuid")),
+                    rs.getTimestamp("invited_at"),
+                    rs.getTimestamp("expires_at")
+                );
+            }, now);
+
+            for (TownInvitation invitation : invitations) {
+                activeInvitations.put(invitation.getPlayerUuid(), invitation);
+            }
+
+            plugin.getLogger().info("Loaded " + invitations.size() + " active town invitations");
+
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Failed to load town invitations: " + e.getMessage());
+        }
+    }
+
+    public CompletableFuture<Boolean> sendInvitation(UUID townUuid, UUID inviterUuid, UUID playerUuid) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                // Check if player already has a pending invitation from this town
-                if (hasActiveTownInvitation(inviteeUuid, townUuid)) {
+                // Check if player already has active invitation
+                if (hasActiveInvitation(playerUuid)) {
                     return false;
                 }
 
-                // Check if player is already in a town
-                var townyPlayer = plugin.getPlayerManager().getPlayer(inviteeUuid);
-                if (townyPlayer != null && townyPlayer.hasTown()) {
-                    return false;
-                }
-
-                // Get town information
                 Town town = plugin.getTownManager().getTown(townUuid);
-                if (town == null) {
+                TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(playerUuid);
+
+                if (town == null || townyPlayer == null || townyPlayer.hasTown()) {
                     return false;
                 }
 
                 // Create invitation
-                TownInvitation invitation = new TownInvitation(townUuid, inviterUuid, inviteeUuid);
+                Timestamp now = new Timestamp(System.currentTimeMillis());
+                Timestamp expires = new Timestamp(now.getTime() + (24 * 60 * 60 * 1000)); // 24 hours
 
-                // Store invitation
-                activeInvitations.put(inviteeUuid, invitation);
-                playerInvitations.computeIfAbsent(inviteeUuid, k -> new HashSet<>()).add(invitation.getInvitationId());
+                TownInvitation invitation = new TownInvitation(townUuid, playerUuid, inviterUuid, now, expires);
 
-                // Send message to invitee
-                Player invitee = plugin.getServer().getPlayer(inviteeUuid);
-                if (invitee != null) {
-                    Player inviter = plugin.getServer().getPlayer(inviterUuid);
-                    String inviterName = inviter != null ? inviter.getName() : "Unknown";
+                // Save to database
+                String sql = """
+                    INSERT INTO %stown_invitations (town_uuid, player_uuid, inviter_uuid, invited_at, expires_at, status)
+                    VALUES (?, ?, ?, ?, ?, 'PENDING')
+                    """.formatted(plugin.getDatabaseManager().getTablePrefix());
 
-                    invitee.sendMessage("§6=== Town Invitation ===");
-                    invitee.sendMessage("§eYou have been invited to join the town: §a" + town.getName());
-                    invitee.sendMessage("§eInvited by: §f" + inviterName);
-                    invitee.sendMessage("§eExpires in: §c" + invitation.getFormattedTimeRemaining());
-                    invitee.sendMessage("§aUse /town accept to accept this invitation");
-                    invitee.sendMessage("§cUse /town decline to decline this invitation");
-                    invitee.sendMessage("§7=========================");
+                plugin.getDatabaseManager().executeUpdate(sql,
+                    townUuid.toString(),
+                    playerUuid.toString(),
+                    inviterUuid.toString(),
+                    now,
+                    expires
+                );
+
+                activeInvitations.put(playerUuid, invitation);
+
+                // Send notification to player
+                Player player = plugin.getServer().getPlayer(playerUuid);
+                if (player != null) {
+                    sendInvitationNotification(player, town, invitation);
                 }
 
                 return true;
-            } catch (Exception e) {
-                plugin.getLogger().severe("Error sending town invitation: " + e.getMessage());
+
+            } catch (SQLException e) {
+                plugin.getLogger().severe("Failed to send town invitation: " + e.getMessage());
                 return false;
             }
-        });
+        }, Bukkit.getScheduler().getMainThreadExecutor(plugin));
     }
 
-    /**
-     * Accept a town invitation
-     */
+    private void sendInvitationNotification(Player player, Town town, TownInvitation invitation) {
+        player.sendMessage("§6=== Town Invitation ===");
+        player.sendMessage("§eYou have been invited to join the town §a" + town.getName() + "§e!");
+        player.sendMessage("§eMayor: §f" + getPlayerName(town.getMayorUuid()));
+        player.sendMessage("§eResidents: §f" + town.getResidentCount() + "/" + town.getMaxResidents());
+        player.sendMessage("§eTax Rate: §f" + town.getTaxRate() + "%");
+
+        if (town.hasNation()) {
+            var nation = plugin.getNationManager().getNation(town.getNationUuid());
+            if (nation != null) {
+                player.sendMessage("§eNation: §f" + nation.getName());
+            }
+        }
+
+        player.sendMessage("");
+        player.sendMessage("§eThis invitation will expire in §c24 hours§e.");
+        player.sendMessage("");
+
+        // Create clickable buttons
+        Component acceptButton = Component.text("§a[ACCEPT]")
+            .clickEvent(ClickEvent.runCommand("/town invite accept"))
+            .hoverEvent(HoverEvent.showText(Component.text("§aClick to accept the invitation")));
+
+        Component denyButton = Component.text("§c[DENY]")
+            .clickEvent(ClickEvent.runCommand("/town invite deny"))
+            .hoverEvent(HoverEvent.showText(Component.text("§cClick to deny the invitation")));
+
+        Component message = acceptButton
+            .append(Component.text("§7   "))
+            .append(denyButton);
+
+        player.sendMessage(message);
+        player.sendMessage("§7You can also use: §e/town invite accept§7 or §e/town invite deny");
+    }
+
     public CompletableFuture<Boolean> acceptInvitation(UUID playerUuid) {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 TownInvitation invitation = activeInvitations.get(playerUuid);
-                if (invitation == null || !invitation.isPending()) {
+                if (invitation == null || invitation.isExpired()) {
                     return false;
                 }
-
-                // Mark as accepted
-                invitation.setAccepted(true);
 
                 // Add player to town
-                boolean success = plugin.getTownManager().addPlayerToTown(invitation.getTownUuid(), playerUuid).join();
+                boolean success = plugin.getTownManager().addPlayerToTown(
+                    invitation.getTownUuid(),
+                    playerUuid
+                ).join();
 
                 if (success) {
-                    // Remove invitation
-                    removeInvitation(playerUuid);
+                    // Update invitation status
+                    updateInvitationStatus(invitation, "ACCEPTED");
+                    activeInvitations.remove(playerUuid);
 
                     // Notify players
-                    Player player = plugin.getServer().getPlayer(playerUuid);
-                    Town town = plugin.getTownManager().getTown(invitation.getTownUuid());
-
-                    if (player != null && town != null) {
-                        player.sendMessage("§aYou have joined the town: " + town.getName());
-
-                        // Notify inviter
-                        Player inviter = plugin.getServer().getPlayer(invitation.getInviterUuid());
-                        if (inviter != null) {
-                            inviter.sendMessage("§a" + player.getName() + " has accepted your town invitation!");
-                        }
-
-                        // Notify mayor if different from inviter
-                        if (!invitation.getInviterUuid().equals(town.getMayorUuid())) {
-                            Player mayor = plugin.getServer().getPlayer(town.getMayorUuid());
-                            if (mayor != null) {
-                                mayor.sendMessage("§a" + player.getName() + " has joined your town!");
-                            }
-                        }
-                    }
-
-                    return true;
-                } else {
-                    // Failed to add to town, clean up invitation
-                    removeInvitation(playerUuid);
-                    return false;
+                    notifyInvitationResult(invitation, true);
                 }
+
+                return success;
+
             } catch (Exception e) {
-                plugin.getLogger().severe("Error accepting town invitation: " + e.getMessage());
+                plugin.getLogger().severe("Failed to accept town invitation: " + e.getMessage());
                 return false;
             }
-        });
+        }, Bukkit.getScheduler().getMainThreadExecutor(plugin));
     }
 
-    /**
-     * Decline a town invitation
-     */
-    public CompletableFuture<Boolean> declineInvitation(UUID playerUuid) {
+    public CompletableFuture<Boolean> denyInvitation(UUID playerUuid) {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 TownInvitation invitation = activeInvitations.get(playerUuid);
-                if (invitation == null || !invitation.isPending()) {
+                if (invitation == null) {
                     return false;
                 }
 
-                // Mark as declined
-                invitation.setDeclined(true);
+                // Update invitation status
+                updateInvitationStatus(invitation, "DENIED");
+                activeInvitations.remove(playerUuid);
 
                 // Notify players
-                Player player = plugin.getServer().getPlayer(playerUuid);
-                Town town = plugin.getTownManager().getTown(invitation.getTownUuid());
+                notifyInvitationResult(invitation, false);
 
-                if (player != null && town != null) {
-                    player.sendMessage("§cYou have declined the invitation to join " + town.getName());
-
-                    // Notify inviter
-                    Player inviter = plugin.getServer().getPlayer(invitation.getInviterUuid());
-                    if (inviter != null) {
-                        inviter.sendMessage("§c" + player.getName() + " has declined your town invitation.");
-                    }
-                }
-
-                // Remove invitation
-                removeInvitation(playerUuid);
                 return true;
+
             } catch (Exception e) {
-                plugin.getLogger().severe("Error declining town invitation: " + e.getMessage());
+                plugin.getLogger().severe("Failed to deny town invitation: " + e.getMessage());
                 return false;
             }
+        }, Bukkit.getScheduler().getMainThreadExecutor(plugin));
+    }
+
+    public CompletableFuture<Boolean> declineInvitation(UUID playerUuid) {
+        // Alias for denyInvitation to maintain consistency with command naming
+        return denyInvitation(playerUuid);
+    }
+
+    private void updateInvitationStatus(TownInvitation invitation, String status) {
+        try {
+            String sql = """
+                UPDATE %stown_invitations 
+                SET status = ?, responded_at = ?
+                WHERE town_uuid = ? AND player_uuid = ? AND status = 'PENDING'
+                """.formatted(plugin.getDatabaseManager().getTablePrefix());
+
+            plugin.getDatabaseManager().executeUpdate(sql,
+                status,
+                new Timestamp(System.currentTimeMillis()),
+                invitation.getTownUuid().toString(),
+                invitation.getPlayerUuid().toString()
+            );
+
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Failed to update invitation status: " + e.getMessage());
+        }
+    }
+
+    private void notifyInvitationResult(TownInvitation invitation, boolean accepted) {
+        Town town = plugin.getTownManager().getTown(invitation.getTownUuid());
+        if (town == null) return;
+
+        String playerName = getPlayerName(invitation.getPlayerUuid());
+
+        // Notify inviter
+        Player inviter = plugin.getServer().getPlayer(invitation.getInviterUuid());
+        if (inviter != null) {
+            if (accepted) {
+                inviter.sendMessage("§a✓ " + playerName + " has accepted your town invitation!");
+            } else {
+                inviter.sendMessage("§c✗ " + playerName + " has denied your town invitation.");
+            }
+        }
+
+        // Notify player
+        Player player = plugin.getServer().getPlayer(invitation.getPlayerUuid());
+        if (player != null) {
+            if (accepted) {
+                player.sendMessage("§a✓ You have successfully joined the town " + town.getName() + "!");
+            } else {
+                player.sendMessage("§c✗ You have denied the invitation to join " + town.getName() + ".");
+            }
+        }
+
+        // Notify mayor if different from inviter
+        if (!invitation.getInviterUuid().equals(town.getMayorUuid())) {
+            Player mayor = plugin.getServer().getPlayer(town.getMayorUuid());
+            if (mayor != null) {
+                if (accepted) {
+                    mayor.sendMessage("§a" + playerName + " has joined your town!");
+                } else {
+                    mayor.sendMessage("§c" + playerName + " denied the invitation to join your town.");
+                }
+            }
+        }
+    }
+
+    public boolean hasActiveInvitation(UUID playerUuid) {
+        TownInvitation invitation = activeInvitations.get(playerUuid);
+        if (invitation == null) return false;
+
+        if (invitation.isExpired()) {
+            activeInvitations.remove(playerUuid);
+            return false;
+        }
+
+        return true;
+    }
+
+    public TownInvitation getActiveInvitation(UUID playerUuid) {
+        return activeInvitations.get(playerUuid);
+    }
+
+    private String getPlayerName(UUID playerUuid) {
+        Player player = plugin.getServer().getPlayer(playerUuid);
+        if (player != null) return player.getName();
+
+        TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(playerUuid);
+        return townyPlayer != null ? townyPlayer.getName() : "Unknown";
+    }
+
+    // Clean up expired invitations periodically
+    public void cleanupExpiredInvitations() {
+        activeInvitations.entrySet().removeIf(entry -> {
+            if (entry.getValue().isExpired()) {
+                try {
+                    updateInvitationStatus(entry.getValue(), "EXPIRED");
+                } catch (Exception e) {
+                    plugin.getLogger().warning("Failed to update expired invitation: " + e.getMessage());
+                }
+                return true;
+            }
+            return false;
         });
     }
 
-    /**
-     * Get active invitation for a player
-     */
-    public TownInvitation getActiveInvitation(UUID playerUuid) {
-        TownInvitation invitation = activeInvitations.get(playerUuid);
-        if (invitation != null && invitation.isPending()) {
-            return invitation;
-        }
-        return null;
-    }
+    public static class TownInvitation {
+        private final UUID townUuid;
+        private final UUID playerUuid;
+        private final UUID inviterUuid;
+        private final Timestamp invitedAt;
+        private final Timestamp expiresAt;
 
-    /**
-     * Check if player has active invitation from specific town
-     */
-    public boolean hasActiveTownInvitation(UUID playerUuid, UUID townUuid) {
-        TownInvitation invitation = activeInvitations.get(playerUuid);
-        return invitation != null && invitation.isPending() && invitation.getTownUuid().equals(townUuid);
-    }
-
-    /**
-     * Check if player has any active invitation
-     */
-    public boolean hasActiveInvitation(UUID playerUuid) {
-        TownInvitation invitation = activeInvitations.get(playerUuid);
-        return invitation != null && invitation.isPending();
-    }
-
-    /**
-     * Remove invitation for a player
-     */
-    public void removeInvitation(UUID playerUuid) {
-        TownInvitation invitation = activeInvitations.remove(playerUuid);
-        if (invitation != null) {
-            Set<UUID> invitations = playerInvitations.get(playerUuid);
-            if (invitations != null) {
-                invitations.remove(invitation.getInvitationId());
-                if (invitations.isEmpty()) {
-                    playerInvitations.remove(playerUuid);
-                }
-            }
-        }
-    }
-
-    /**
-     * Get all active invitations (for debugging/admin purposes)
-     */
-    public Collection<TownInvitation> getAllActiveInvitations() {
-        return activeInvitations.values().stream()
-                .filter(TownInvitation::isPending)
-                .toList();
-    }
-
-    /**
-     * Clean up expired invitations
-     */
-    private void cleanupExpiredInvitations() {
-        List<UUID> toRemove = new ArrayList<>();
-
-        for (Map.Entry<UUID, TownInvitation> entry : activeInvitations.entrySet()) {
-            if (entry.getValue().isExpired()) {
-                toRemove.add(entry.getKey());
-            }
+        public TownInvitation(UUID townUuid, UUID playerUuid, UUID inviterUuid, Timestamp invitedAt, Timestamp expiresAt) {
+            this.townUuid = townUuid;
+            this.playerUuid = playerUuid;
+            this.inviterUuid = inviterUuid;
+            this.invitedAt = invitedAt;
+            this.expiresAt = expiresAt;
         }
 
-        for (UUID playerUuid : toRemove) {
-            TownInvitation invitation = activeInvitations.get(playerUuid);
-            if (invitation != null) {
-                // Notify player about expiration
-                Player player = plugin.getServer().getPlayer(playerUuid);
-                if (player != null) {
-                    Town town = plugin.getTownManager().getTown(invitation.getTownUuid());
-                    if (town != null) {
-                        player.sendMessage("§cYour invitation to join " + town.getName() + " has expired.");
-                    }
-                }
-            }
-            removeInvitation(playerUuid);
+        public UUID getTownUuid() { return townUuid; }
+        public UUID getPlayerUuid() { return playerUuid; }
+        public UUID getInviterUuid() { return inviterUuid; }
+        public Timestamp getInvitedAt() { return invitedAt; }
+        public Timestamp getExpiresAt() { return expiresAt; }
+
+        public boolean isExpired() {
+            return System.currentTimeMillis() > expiresAt.getTime();
         }
-    }
-
-    /**
-     * Start the cleanup task for expired invitations
-     */
-    private void startCleanupTask() {
-        new BukkitRunnable() {
-            @Override
-            public void run() {
-                cleanupExpiredInvitations();
-            }
-        }.runTaskTimer(plugin, 20L * 30, 20L * 30); // Run every 30 seconds
-    }
-
-    /**
-     * Cancel all invitations when plugin is disabled
-     */
-    public void shutdown() {
-        activeInvitations.clear();
-        playerInvitations.clear();
     }
 }
