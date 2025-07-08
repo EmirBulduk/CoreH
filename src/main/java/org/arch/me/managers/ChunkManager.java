@@ -133,6 +133,13 @@ public class ChunkManager {
                         plugin.getLogger().info("Chunk claim failed: Only nations can claim chunks in the Nether");
                         return false;
                     }
+
+                    // Check if this specific nation is allowed to claim in Nether
+                    String settingKey = "nether_allowed_nation_" + town.getNationUuid().toString();
+                    if (!plugin.getSettingsManager().getBooleanSetting(settingKey, false)) {
+                        plugin.getLogger().info("Chunk claim failed: Nation is not specifically allowed to claim in the Nether");
+                        return false;
+                    }
                 }
 
                 if (plugin.getConfigManager().getDisabledClaimingWorlds().contains(world)) {
@@ -596,13 +603,13 @@ public class ChunkManager {
     }
 
     public List<ClaimedChunk> getChunksByOwner(UUID ownerUuid) {
-    public List<ClaimedChunk> getAllClaimedChunks() {
-        return new ArrayList<>(claimedChunks.values());
-    }
-
         return claimedChunks.values().stream()
                 .filter(chunk -> chunk.isOwner(ownerUuid))
                 .toList();
+    }
+
+    public List<ClaimedChunk> getAllClaimedChunks() {
+        return new ArrayList<>(claimedChunks.values());
     }
 
     public int getClaimedChunkCount() {

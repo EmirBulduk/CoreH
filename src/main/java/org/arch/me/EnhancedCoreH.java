@@ -33,7 +33,6 @@ public final class EnhancedCoreH extends JavaPlugin {
     private TownInvitationManager townInvitationManager;
     private NationInvitationManager nationInvitationManager;
     private SettingsManager settingsManager;
-    private SettingsManager settingsManager;
 
     @Override
     public void onEnable() {

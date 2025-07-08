@@ -13,6 +13,7 @@ import org.bukkit.entity.Player;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.UUID;
 
 public class TownyAdminCommand implements CommandExecutor, TabCompleter {
 
@@ -41,7 +42,6 @@ public class TownyAdminCommand implements CommandExecutor, TabCompleter {
             case "reload" -> handleReload(sender, args);
             case "save" -> handleSave(sender, args);
             case "purge" -> handlePurge(sender, args);
-            case "nether" -> handleNether(sender, args);
             case "nether" -> handleNether(sender, args);
             default -> showHelp(sender);
         }
@@ -312,9 +312,10 @@ public class TownyAdminCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage("§cPurge functionality not yet implemented.");
         // TODO: Implement purge functionality for inactive towns/nations/players
     }
+
     private void handleNether(CommandSender sender, String[] args) {
         if (args.length < 2) {
-            sender.sendMessage("§cUsage: /townyadmin nether <enable|disable|status>");
+            sender.sendMessage("§cUsage: /townyadmin nether <enable|disable|status|allow|deny>");
             return;
         }
 
@@ -324,7 +325,9 @@ public class TownyAdminCommand implements CommandExecutor, TabCompleter {
             case "enable" -> handleNetherEnable(sender);
             case "disable" -> handleNetherDisable(sender);
             case "status" -> handleNetherStatus(sender);
-            default -> sender.sendMessage("§cInvalid nether action. Use: enable, disable, status");
+            case "allow" -> handleNetherAllow(sender, args);
+            case "deny" -> handleNetherDeny(sender, args);
+            default -> sender.sendMessage("§cInvalid nether action. Use: enable, disable, status, allow, deny");
         }
     }
 
@@ -361,19 +364,104 @@ public class TownyAdminCommand implements CommandExecutor, TabCompleter {
         });
     }
 
+    private void handleNetherAllow(CommandSender sender, String[] args) {
+        if (args.length < 3) {
+            sender.sendMessage("§cUsage: /townyadmin nether allow <nation_name>");
+            return;
+        }
+
+        String nationName = args[2];
+        var nation = plugin.getNationManager().getNation(nationName);
+
+        if (nation == null) {
+            sender.sendMessage("§cNation not found: " + nationName);
+            return;
+        }
+
+        String settingKey = "nether_allowed_nation_" + nation.getUuid().toString();
+        plugin.getSettingsManager().setBooleanSetting(settingKey, true).thenAccept(success -> {
+            if (success) {
+                sender.sendMessage("§a✓ Nation §e" + nationName + "§a is now allowed to claim in the Nether!");
+
+                // Notify nation members
+                for (var town : plugin.getTownManager().getTownsByNation(nation.getUuid())) {
+                    for (UUID residentUuid : town.getResidents()) {
+                        var player = plugin.getServer().getPlayer(residentUuid);
+                        if (player != null) {
+                            player.sendMessage("§6[Nation] §aYour nation can now claim chunks in the Nether!");
+                        }
+                    }
+                }
+            } else {
+                sender.sendMessage("§cFailed to allow Nether claiming for nation!");
+            }
+        });
+    }
+
+    private void handleNetherDeny(CommandSender sender, String[] args) {
+        if (args.length < 3) {
+            sender.sendMessage("§cUsage: /townyadmin nether deny <nation_name>");
+            return;
+        }
+
+        String nationName = args[2];
+        var nation = plugin.getNationManager().getNation(nationName);
+
+        if (nation == null) {
+            sender.sendMessage("§cNation not found: " + nationName);
+            return;
+        }
+
+        String settingKey = "nether_allowed_nation_" + nation.getUuid().toString();
+        plugin.getSettingsManager().setBooleanSetting(settingKey, false).thenAccept(success -> {
+            if (success) {
+                sender.sendMessage("§c✓ Nation §e" + nationName + "§c is no longer allowed to claim in the Nether!");
+
+                // Notify nation members
+                for (var town : plugin.getTownManager().getTownsByNation(nation.getUuid())) {
+                    for (UUID residentUuid : town.getResidents()) {
+                        var player = plugin.getServer().getPlayer(residentUuid);
+                        if (player != null) {
+                            player.sendMessage("§6[Nation] §cYour nation can no longer claim new chunks in the Nether!");
+                        }
+                    }
+                }
+            } else {
+                sender.sendMessage("§cFailed to deny Nether claiming for nation!");
+            }
+        });
+    }
+
     private void handleNetherStatus(CommandSender sender) {
         boolean isEnabled = plugin.getSettingsManager().isNetherClaimingEnabled();
 
         sender.sendMessage("§6=== Nether Claiming Status ===");
-        sender.sendMessage("§eStatus: " + (isEnabled ? "§2ENABLED" : "§4DISABLED"));
+        sender.sendMessage("§eGlobal Status: " + (isEnabled ? "§2ENABLED" : "§4DISABLED"));
         sender.sendMessage("§eDescription: " + (isEnabled ?
                 "Nations can claim chunks in the Nether" :
                 "Nations cannot claim chunks in the Nether"));
 
         if (isEnabled) {
             sender.sendMessage("§7• Only towns that are part of a nation can claim in the Nether");
-            sender.sendMessage("§7• Regular towns without nations cannot claim in the Nether");
+            sender.sendMessage("§7• Individual nations can be allowed/denied access");
             sender.sendMessage("§7• All normal claiming rules and costs still apply");
+
+            // Show allowed nations
+            var nations = plugin.getNationManager().getAllNations();
+            var allowedNations = new ArrayList<String>();
+
+            for (var nation : nations) {
+                String settingKey = "nether_allowed_nation_" + nation.getUuid().toString();
+                if (plugin.getSettingsManager().getBooleanSetting(settingKey, false)) {
+                    allowedNations.add(nation.getName());
+                }
+            }
+
+            if (!allowedNations.isEmpty()) {
+                sender.sendMessage("§eAllowed Nations: §a" + String.join("§7, §a", allowedNations));
+            } else {
+                sender.sendMessage("§eAllowed Nations: §7None specifically allowed");
+            }
         } else {
             sender.sendMessage("§7• No new Nether claims can be made");
             sender.sendMessage("§7• Existing Nether claims remain protected");
@@ -388,60 +476,6 @@ public class TownyAdminCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage("§eExisting Nether Claims: §f" + netherClaimCount);
     }
 
-
-    private void handleNether(CommandSender sender, String[] args) {
-        if (args.length < 2) {
-            sender.sendMessage("§cUsage: /townyadmin nether <set|reset|info>");
-            return;
-        }
-
-        String action = args[1].toLowerCase();
-
-        switch (action) {
-            case "set" -> handleNetherSet(sender, args);
-            case "reset" -> handleNetherReset(sender, args);
-            case "info" -> handleNetherInfo(sender, args);
-            default -> sender.sendMessage("§cInvalid nether action. Use: set, reset, info");
-        }
-    }
-
-    private void handleNetherSet(CommandSender sender, String[] args) {
-        if (args.length < 3) {
-            sender.sendMessage("§cUsage: /townyadmin nether set <name>");
-            return;
-        }
-
-        String netherName = args[2];
-
-        // TODO: Implement nether set logic
-        sender.sendMessage("§cNether set action not implemented yet.");
-    }
-
-    private void handleNetherReset(CommandSender sender, String[] args) {
-        if (args.length < 3) {
-            sender.sendMessage("§cUsage: /townyadmin nether reset <name>");
-            return;
-        }
-
-        String netherName = args[2];
-
-        // TODO: Implement nether reset logic
-        sender.sendMessage("§cNether reset action not implemented yet.");
-    }
-
-    private void handleNetherInfo(CommandSender sender, String[] args) {
-        if (args.length < 3) {
-            sender.sendMessage("§cUsage: /townyadmin nether info <name>");
-            return;
-        sender.sendMessage("§e/townyadmin nether <enable|disable|status> §7- Manage nether claiming");
-        }
-
-        String netherName = args[2];
-
-        // TODO: Implement nether info logic
-        sender.sendMessage("§cNether info action not implemented yet.");
-    }
-            List<String> subCommands = Arrays.asList("buffer", "reload", "save", "purge", "nether");
     private void displayBufferZoneInfo(CommandSender sender, BufferZone zone) {
         sender.sendMessage("§6=== Buffer Zone: " + zone.getName() + " ===");
         sender.sendMessage("§eWorld: §f" + zone.getWorldName());
@@ -470,13 +504,6 @@ public class TownyAdminCommand implements CommandExecutor, TabCompleter {
     }
 
     private Location getPlayerPosition(Player player, String posKey) {
-        } else if (args.length == 2 && args[0].equalsIgnoreCase("nether")) {
-            List<String> netherActions = Arrays.asList("enable", "disable", "status");
-            for (String action : netherActions) {
-                if (action.toLowerCase().startsWith(args[1].toLowerCase())) {
-                    completions.add(action);
-                }
-            }
         // Simple implementation using player metadata
         // In a real implementation, you might want to use a more sophisticated storage system
         return player.hasMetadata("towny_" + posKey) ?
