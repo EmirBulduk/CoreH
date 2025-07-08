@@ -69,11 +69,23 @@ public class ConfigManager {
 
         // Town settings
         config.addDefault("towns.max-residents", 20);
-        config.addDefault("towns.max-chunks", 100);
+        config.addDefault("towns.max-chunks", 450);
         config.addDefault("towns.default-tax-rate", 0.0);
         config.addDefault("towns.allow-public-spawning", true);
         config.addDefault("towns.spawn-cooldown", 30);
         config.addDefault("towns.require-chunks-connected", false);
+
+        // Chunk limit expansion system
+        config.addDefault("towns.chunk-limit-tiers.tier1.max-chunks", 50);
+        config.addDefault("towns.chunk-limit-tiers.tier1.cost", 0.0);
+        config.addDefault("towns.chunk-limit-tiers.tier2.max-chunks", 75);
+        config.addDefault("towns.chunk-limit-tiers.tier2.cost", 5000.0);
+        config.addDefault("towns.chunk-limit-tiers.tier3.max-chunks", 100);
+        config.addDefault("towns.chunk-limit-tiers.tier3.cost", 15000.0);
+        config.addDefault("towns.chunk-limit-tiers.tier4.max-chunks", 200);
+        config.addDefault("towns.chunk-limit-tiers.tier4.cost", 30000.0);
+        config.addDefault("towns.chunk-limit-tiers.tier5.max-chunks", 450);
+        config.addDefault("towns.chunk-limit-tiers.tier5.cost", 50000.0);
 
         // Nation settings
         config.addDefault("nations.max-towns", 50);
@@ -226,5 +238,27 @@ public class ConfigManager {
 
     public List<String> getDisabledClaimingWorlds() {
         return plugin.getConfig().getStringList("worlds.disable-claiming-worlds");
+    }
+
+    // Chunk limit tier methods
+    public int getChunkLimitTierMaxChunks(String tier) {
+        return plugin.getConfig().getInt("towns.chunk-limit-tiers." + tier + ".max-chunks", 10);
+    }
+
+    public double getChunkLimitTierCost(String tier) {
+        return plugin.getConfig().getDouble("towns.chunk-limit-tiers." + tier + ".cost", 0.0);
+    }
+
+    public String getNextChunkLimitTier(int currentMaxChunks) {
+        if (currentMaxChunks < 10) return "tier1";
+        if (currentMaxChunks < 20) return "tier2";
+        if (currentMaxChunks < 30) return "tier3";
+        if (currentMaxChunks < 40) return "tier4";
+        if (currentMaxChunks < 50) return "tier5";
+        return null; // Max tier reached
+    }
+
+    public boolean hasNextChunkLimitTier(int currentMaxChunks) {
+        return getNextChunkLimitTier(currentMaxChunks) != null;
     }
 }

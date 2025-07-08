@@ -120,6 +120,21 @@ public class ChunkManager {
                     return false;
                 }
 
+                // Special check for Nether claiming - only allowed for nations when enabled
+                if (world.equals("world_nether") || world.contains("nether")) {
+                    if (!plugin.getSettingsManager().isNetherClaimingEnabled()) {
+                        plugin.getLogger().info("Chunk claim failed: Nether claiming is disabled");
+                        return false;
+                    }
+
+                    // Check if town is part of a nation
+                    Town town = plugin.getTownManager().getTown(townUuid);
+                    if (town == null || !town.hasNation()) {
+                        plugin.getLogger().info("Chunk claim failed: Only nations can claim chunks in the Nether");
+                        return false;
+                    }
+                }
+
                 if (plugin.getConfigManager().getDisabledClaimingWorlds().contains(world)) {
                     plugin.getLogger().info("Chunk claim failed: World " + world + " disabled for claiming");
                     return false;
@@ -581,6 +596,10 @@ public class ChunkManager {
     }
 
     public List<ClaimedChunk> getChunksByOwner(UUID ownerUuid) {
+    public List<ClaimedChunk> getAllClaimedChunks() {
+        return new ArrayList<>(claimedChunks.values());
+    }
+
         return claimedChunks.values().stream()
                 .filter(chunk -> chunk.isOwner(ownerUuid))
                 .toList();
@@ -595,5 +614,84 @@ public class ChunkManager {
                 .filter(chunk -> chunk.getTownUuid().equals(townUuid))
                 .count();
     }
-}
 
+    // Chunk limit expansion system
+    public CompletableFuture<Boolean> expandChunkLimit(UUID townUuid, UUID playerUuid) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                Town town = plugin.getTownManager().getTown(townUuid);
+                if (town == null) {
+                    plugin.getLogger().info("Chunk limit expansion failed: Town not found");
+                    return false;
+                }
+
+                // Check if player is mayor
+                if (!town.isMayor(playerUuid)) {
+                    plugin.getLogger().info("Chunk limit expansion failed: Player is not mayor");
+                    return false;
+                }
+
+                // Check if next tier is available
+                String nextTier = plugin.getConfigManager().getNextChunkLimitTier(town.getMaxChunks());
+                if (nextTier == null) {
+                    plugin.getLogger().info("Chunk limit expansion failed: Already at maximum tier");
+                    return false;
+                }
+
+                int newMaxChunks = plugin.getConfigManager().getChunkLimitTierMaxChunks(nextTier);
+                BigDecimal cost = BigDecimal.valueOf(plugin.getConfigManager().getChunkLimitTierCost(nextTier));
+
+                // Check if town can afford the expansion
+                if (!plugin.getEconomyManager().hasTownBalance(townUuid, cost)) {
+                    plugin.getLogger().info("Chunk limit expansion failed: Insufficient town funds. Required: " + cost + ", Available: " + plugin.getEconomyManager().getTownBalance(townUuid));
+                    return false;
+                }
+
+                // Withdraw money from town
+                if (!plugin.getEconomyManager().withdrawTown(townUuid, cost)) {
+                    plugin.getLogger().info("Chunk limit expansion failed: Failed to withdraw money");
+                    return false;
+                }
+
+                // Update town's max chunks
+                town.setMaxChunks(newMaxChunks);
+                plugin.getTownManager().saveTown(town);
+
+                plugin.getLogger().info("Chunk limit expanded for town " + town.getName() + " to " + newMaxChunks + " chunks for " + cost + " coins");
+                return true;
+
+            } catch (Exception e) {
+                plugin.getLogger().severe("Failed to expand chunk limit: " + e.getMessage());
+                e.printStackTrace();
+                return false;
+            }
+        });
+    }
+
+    public boolean canExpandChunkLimit(UUID townUuid) {
+        Town town = plugin.getTownManager().getTown(townUuid);
+        if (town == null) return false;
+
+        return plugin.getConfigManager().hasNextChunkLimitTier(town.getMaxChunks());
+    }
+
+    public BigDecimal getChunkLimitExpansionCost(UUID townUuid) {
+        Town town = plugin.getTownManager().getTown(townUuid);
+        if (town == null) return BigDecimal.ZERO;
+
+        String nextTier = plugin.getConfigManager().getNextChunkLimitTier(town.getMaxChunks());
+        if (nextTier == null) return BigDecimal.ZERO;
+
+        return BigDecimal.valueOf(plugin.getConfigManager().getChunkLimitTierCost(nextTier));
+    }
+
+    public int getNextChunkLimitTierMaxChunks(UUID townUuid) {
+        Town town = plugin.getTownManager().getTown(townUuid);
+        if (town == null) return 0;
+
+        String nextTier = plugin.getConfigManager().getNextChunkLimitTier(town.getMaxChunks());
+        if (nextTier == null) return town.getMaxChunks();
+
+        return plugin.getConfigManager().getChunkLimitTierMaxChunks(nextTier);
+    }
+}

@@ -37,7 +37,7 @@ public class Town {
         this.taxRate = BigDecimal.ZERO;
         this.upkeepCost = BigDecimal.ZERO;
         this.maxResidents = 20;
-        this.maxChunks = 10; // Default chunk limit
+        this.maxChunks = 50; // Start with tier 1 limit
         this.isOpen = true;
         this.isPublic = false;
         this.permissions = new HashSet<>();

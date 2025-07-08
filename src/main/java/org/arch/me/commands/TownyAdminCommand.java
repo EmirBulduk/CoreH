@@ -41,6 +41,8 @@ public class TownyAdminCommand implements CommandExecutor, TabCompleter {
             case "reload" -> handleReload(sender, args);
             case "save" -> handleSave(sender, args);
             case "purge" -> handlePurge(sender, args);
+            case "nether" -> handleNether(sender, args);
+            case "nether" -> handleNether(sender, args);
             default -> showHelp(sender);
         }
 
@@ -310,7 +312,136 @@ public class TownyAdminCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage("§cPurge functionality not yet implemented.");
         // TODO: Implement purge functionality for inactive towns/nations/players
     }
+    private void handleNether(CommandSender sender, String[] args) {
+        if (args.length < 2) {
+            sender.sendMessage("§cUsage: /townyadmin nether <enable|disable|status>");
+            return;
+        }
 
+        String action = args[1].toLowerCase();
+
+        switch (action) {
+            case "enable" -> handleNetherEnable(sender);
+            case "disable" -> handleNetherDisable(sender);
+            case "status" -> handleNetherStatus(sender);
+            default -> sender.sendMessage("§cInvalid nether action. Use: enable, disable, status");
+        }
+    }
+
+    private void handleNetherEnable(CommandSender sender) {
+        plugin.getSettingsManager().setNetherClaimingEnabled(true).thenAccept(success -> {
+            if (success) {
+                sender.sendMessage("§a✓ Nether claiming for nations has been §2ENABLED§a!");
+                sender.sendMessage("§eNations can now claim chunks in the Nether dimension.");
+
+                // Broadcast to all online players with admin permission
+                plugin.getServer().getOnlinePlayers().stream()
+                        .filter(p -> p.hasPermission("towny.admin"))
+                        .forEach(p -> p.sendMessage("§6[Server] §eNether claiming has been enabled by " + sender.getName()));
+            } else {
+                sender.sendMessage("§cFailed to enable Nether claiming! Check console for errors.");
+            }
+        });
+    }
+
+    private void handleNetherDisable(CommandSender sender) {
+        plugin.getSettingsManager().setNetherClaimingEnabled(false).thenAccept(success -> {
+            if (success) {
+                sender.sendMessage("§c✓ Nether claiming for nations has been §4DISABLED§c!");
+                sender.sendMessage("§eNations can no longer claim new chunks in the Nether dimension.");
+                sender.sendMessage("§7Existing Nether claims remain intact.");
+
+                // Broadcast to all online players with admin permission
+                plugin.getServer().getOnlinePlayers().stream()
+                        .filter(p -> p.hasPermission("towny.admin"))
+                        .forEach(p -> p.sendMessage("§6[Server] §eNether claiming has been disabled by " + sender.getName()));
+            } else {
+                sender.sendMessage("§cFailed to disable Nether claiming! Check console for errors.");
+            }
+        });
+    }
+
+    private void handleNetherStatus(CommandSender sender) {
+        boolean isEnabled = plugin.getSettingsManager().isNetherClaimingEnabled();
+
+        sender.sendMessage("§6=== Nether Claiming Status ===");
+        sender.sendMessage("§eStatus: " + (isEnabled ? "§2ENABLED" : "§4DISABLED"));
+        sender.sendMessage("§eDescription: " + (isEnabled ?
+                "Nations can claim chunks in the Nether" :
+                "Nations cannot claim chunks in the Nether"));
+
+        if (isEnabled) {
+            sender.sendMessage("§7• Only towns that are part of a nation can claim in the Nether");
+            sender.sendMessage("§7• Regular towns without nations cannot claim in the Nether");
+            sender.sendMessage("§7• All normal claiming rules and costs still apply");
+        } else {
+            sender.sendMessage("§7• No new Nether claims can be made");
+            sender.sendMessage("§7• Existing Nether claims remain protected");
+        }
+
+        // Count existing Nether claims
+        long netherClaimCount = plugin.getChunkManager().getAllClaimedChunks().stream()
+                .filter(chunk -> chunk.getWorldName().equals("world_nether") ||
+                        chunk.getWorldName().contains("nether"))
+                .count();
+
+        sender.sendMessage("§eExisting Nether Claims: §f" + netherClaimCount);
+    }
+
+
+    private void handleNether(CommandSender sender, String[] args) {
+        if (args.length < 2) {
+            sender.sendMessage("§cUsage: /townyadmin nether <set|reset|info>");
+            return;
+        }
+
+        String action = args[1].toLowerCase();
+
+        switch (action) {
+            case "set" -> handleNetherSet(sender, args);
+            case "reset" -> handleNetherReset(sender, args);
+            case "info" -> handleNetherInfo(sender, args);
+            default -> sender.sendMessage("§cInvalid nether action. Use: set, reset, info");
+        }
+    }
+
+    private void handleNetherSet(CommandSender sender, String[] args) {
+        if (args.length < 3) {
+            sender.sendMessage("§cUsage: /townyadmin nether set <name>");
+            return;
+        }
+
+        String netherName = args[2];
+
+        // TODO: Implement nether set logic
+        sender.sendMessage("§cNether set action not implemented yet.");
+    }
+
+    private void handleNetherReset(CommandSender sender, String[] args) {
+        if (args.length < 3) {
+            sender.sendMessage("§cUsage: /townyadmin nether reset <name>");
+            return;
+        }
+
+        String netherName = args[2];
+
+        // TODO: Implement nether reset logic
+        sender.sendMessage("§cNether reset action not implemented yet.");
+    }
+
+    private void handleNetherInfo(CommandSender sender, String[] args) {
+        if (args.length < 3) {
+            sender.sendMessage("§cUsage: /townyadmin nether info <name>");
+            return;
+        sender.sendMessage("§e/townyadmin nether <enable|disable|status> §7- Manage nether claiming");
+        }
+
+        String netherName = args[2];
+
+        // TODO: Implement nether info logic
+        sender.sendMessage("§cNether info action not implemented yet.");
+    }
+            List<String> subCommands = Arrays.asList("buffer", "reload", "save", "purge", "nether");
     private void displayBufferZoneInfo(CommandSender sender, BufferZone zone) {
         sender.sendMessage("§6=== Buffer Zone: " + zone.getName() + " ===");
         sender.sendMessage("§eWorld: §f" + zone.getWorldName());
@@ -339,6 +470,13 @@ public class TownyAdminCommand implements CommandExecutor, TabCompleter {
     }
 
     private Location getPlayerPosition(Player player, String posKey) {
+        } else if (args.length == 2 && args[0].equalsIgnoreCase("nether")) {
+            List<String> netherActions = Arrays.asList("enable", "disable", "status");
+            for (String action : netherActions) {
+                if (action.toLowerCase().startsWith(args[1].toLowerCase())) {
+                    completions.add(action);
+                }
+            }
         // Simple implementation using player metadata
         // In a real implementation, you might want to use a more sophisticated storage system
         return player.hasMetadata("towny_" + posKey) ?
@@ -356,6 +494,9 @@ public class TownyAdminCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage("§e/townyadmin buffer pos2 §7- Set second corner");
         sender.sendMessage("§e/townyadmin reload §7- Reload configuration");
         sender.sendMessage("§e/townyadmin save §7- Save all data");
+        sender.sendMessage("§e/townyadmin nether set <name> §7- Set nether location");
+        sender.sendMessage("§e/townyadmin nether reset <name> §7- Reset nether location");
+        sender.sendMessage("§e/townyadmin nether info <name> §7- Nether location info");
     }
 
     @Override
@@ -363,7 +504,7 @@ public class TownyAdminCommand implements CommandExecutor, TabCompleter {
         List<String> completions = new ArrayList<>();
 
         if (args.length == 1) {
-            List<String> subCommands = Arrays.asList("buffer", "reload", "save", "purge");
+            List<String> subCommands = Arrays.asList("buffer", "reload", "save", "purge", "nether");
             for (String sub : subCommands) {
                 if (sub.toLowerCase().startsWith(args[0].toLowerCase())) {
                     completions.add(sub);
@@ -392,6 +533,16 @@ public class TownyAdminCommand implements CommandExecutor, TabCompleter {
                     completions.add(flag);
                 }
             }
+        } else if (args.length == 2 && args[0].equalsIgnoreCase("nether")) {
+            List<String> netherActions = Arrays.asList("set", "reset", "info");
+            for (String action : netherActions) {
+                if (action.toLowerCase().startsWith(args[1].toLowerCase())) {
+                    completions.add(action);
+                }
+            }
+        } else if (args.length == 3 && args[0].equalsIgnoreCase("nether")) {
+            // Complete nether names (if applicable)
+            // TODO: Implement nether name completion
         }
 
         return completions;

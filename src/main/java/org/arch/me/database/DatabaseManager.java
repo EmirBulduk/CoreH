@@ -115,7 +115,7 @@ public class DatabaseManager {
             upkeep_cost DECIMAL(15,2) DEFAULT 0.00,
             max_residents INT DEFAULT 20,
             max_chunks INT DEFAULT 50,
-            is_open BIT DEFAULT 1,
+            is_open BIT DEFAULT 0,
             is_public BIT DEFAULT 0,
             board NTEXT,
             permissions NTEXT,
@@ -301,35 +301,26 @@ public class DatabaseManager {
         )
         """.formatted(tablePrefix, tablePrefix, tablePrefix));
 
-        executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_war_towns_war') " +
-                "CREATE INDEX idx_war_towns_war ON %swar_towns(war_id)".formatted(tablePrefix));
-        executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_war_towns_town') " +
-                "CREATE INDEX idx_war_towns_town ON %swar_towns(town_uuid)".formatted(tablePrefix));
-
-        // Buffer zones table
+        // Settings table for server configuration
         executeUpdate("""
-        IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='%sbuffer_zones' AND xtype='U')
-        CREATE TABLE %sbuffer_zones (
-            uuid NVARCHAR(36) PRIMARY KEY,
-            name NVARCHAR(64) NOT NULL,
-            world_name NVARCHAR(32) NOT NULL,
-            x1 INT NOT NULL,
-            z1 INT NOT NULL,
-            x2 INT NOT NULL,
-            z2 INT NOT NULL,
-            created_by NVARCHAR(36) NOT NULL,
-            created_at DATETIME2 DEFAULT GETDATE(),
-            flags NTEXT,
-            reason NTEXT
+        IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='%ssettings' AND xtype='U')
+        CREATE TABLE %ssettings (
+            id INT IDENTITY(1,1) PRIMARY KEY,
+            setting_key NVARCHAR(64) NOT NULL UNIQUE,
+            setting_value NVARCHAR(MAX) NOT NULL,
+            setting_type NVARCHAR(16) NOT NULL DEFAULT 'STRING',
+            description NVARCHAR(256),
+            created_date DATETIME2 DEFAULT GETDATE(),
+            updated_date DATETIME2 DEFAULT GETDATE()
         )
         """.formatted(tablePrefix, tablePrefix));
 
-        executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_buffer_zones_world') " +
-                "CREATE INDEX idx_buffer_zones_world ON %sbuffer_zones(world_name)".formatted(tablePrefix));
-        executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_buffer_zones_creator') " +
-                "CREATE INDEX idx_buffer_zones_creator ON %sbuffer_zones(created_by)".formatted(tablePrefix));
-        executeUpdate("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_buffer_zones_name') " +
-                "CREATE INDEX idx_buffer_zones_name ON %sbuffer_zones(name)".formatted(tablePrefix));
+        // Insert default settings
+        executeUpdate("""
+        IF NOT EXISTS (SELECT * FROM %ssettings WHERE setting_key = 'nether_claiming_enabled')
+        INSERT INTO %ssettings (setting_key, setting_value, setting_type, description)
+        VALUES ('nether_claiming_enabled', 'false', 'BOOLEAN', 'Allow nations to claim chunks in the Nether')
+        """.formatted(tablePrefix, tablePrefix));
 
         // Insert default ranks
         insertDefaultRanks();
@@ -391,11 +382,17 @@ public class DatabaseManager {
         String insertRank = "INSERT INTO %sranks (uuid, name, prefix, permissions, priority, is_default, type, display_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)".formatted(tablePrefix);
 
         String[][] defaultRanks = {
-                {"Resident", "[R]", "towny.resident", "1", "1", "TOWN"}, // Changed to 1 for BIT type
-                {"VIP", "[VIP]", "towny.resident,towny.vip", "2", "0", "TOWN"},
-                {"Councillor", "[C]", "towny.resident,towny.councillor", "3", "0", "TOWN"},
-                {"Mayor", "[M]", "towny.resident,towny.mayor", "4", "0", "TOWN"},
-                {"King", "[K]", "towny.resident,towny.king", "5", "0", "NATION"}
+                {"resident", "[R]", "towny.resident", "1", "1", "TOWN"}, // Changed to lowercase and added missing ranks
+                {"manager", "[MG]", "towny.resident,towny.town.manage", "2", "0", "TOWN"},
+                {"assistant", "[A]", "towny.resident,towny.town.assist", "3", "0", "TOWN"},
+                {"vip", "[VIP]", "towny.resident,towny.vip", "2", "0", "TOWN"},
+                {"councillor", "[C]", "towny.resident,towny.councillor", "3", "0", "TOWN"},
+                {"mayor", "[M]", "towny.resident,towny.mayor", "4", "0", "TOWN"},
+                {"citizen", "[CT]", "towny.nation.citizen", "1", "0", "NATION"},
+                {"advisor", "[AD]", "towny.nation.citizen,towny.nation.advisor", "2", "0", "NATION"},
+                {"deputy", "[D]", "towny.nation.citizen,towny.nation.deputy,towny.nation.invite,towny.nation.kick", "3", "0", "NATION"},
+                {"minister", "[MIN]", "towny.nation.citizen,towny.nation.minister", "4", "0", "NATION"},
+                {"king", "[K]", "towny.resident,towny.king", "5", "0", "NATION"}
         };
 
         for (String[] rank : defaultRanks) {

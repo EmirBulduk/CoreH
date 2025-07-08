@@ -516,6 +516,15 @@ public class TownManager {
         return townCache.containsKey(uuid);
     }
 
+    public Town getTownByPlayer(UUID playerUuid) {
+        for (Town town : townCache.values()) {
+            if (town.hasResident(playerUuid)) {
+                return town;
+            }
+        }
+        return null;
+    }
+
     public boolean renameTown(UUID townUuid, String newName) {
         if (townNameExists(newName)) return false;
         Town town = getTown(townUuid);
@@ -546,14 +555,6 @@ public class TownManager {
 
     public boolean townNameExists(String name) {
         return townNameCache.containsKey(name.toLowerCase());
-    }
-
-    public Town getTownByPlayer(UUID playerUuid) {
-        TownyPlayer player = plugin.getPlayerManager().getPlayer(playerUuid);
-        if (player != null && player.hasTown()) {
-            return getTown(player.getTownUuid());
-        }
-        return null;
     }
 
     public List<Town> getTownsByNation(UUID nationUuid) {

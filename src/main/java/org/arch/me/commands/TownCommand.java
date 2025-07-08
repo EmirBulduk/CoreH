@@ -63,6 +63,7 @@ public class TownCommand implements CommandExecutor, TabCompleter {
             case "info" -> handleInfo(player, args);
             case "list" -> handleList(player, args);
             case "rank" -> handleRank(player, args);
+            case "chunklimit" -> handleChunkLimit(player, args);
             default -> showHelp(player);
         }
 
@@ -854,6 +855,24 @@ public class TownCommand implements CommandExecutor, TabCompleter {
         }
     }
 
+    private void handleChunkLimit(Player player, String[] args) {
+        TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(player.getUniqueId());
+        if (townyPlayer == null || !townyPlayer.hasTown()) {
+            player.sendMessage(plugin.getConfigManager().getMessage("town.not-in-town"));
+            return;
+        }
+
+        Town town = plugin.getTownManager().getTown(townyPlayer.getTownUuid());
+        if (town == null || !town.isMayor(player.getUniqueId())) {
+            player.sendMessage(plugin.getConfigManager().getMessage("town.not-mayor"));
+            return;
+        }
+
+        // Open the chunk limit GUI
+        org.arch.me.gui.ChunkLimitGUI gui = new org.arch.me.gui.ChunkLimitGUI(plugin);
+        gui.openChunkLimitGUI(player, town.getUuid());
+    }
+
     private boolean hasClaimPermission(Town town, UUID playerUuid) {
         // Check if player has claim permission through rank system or is mayor
         return plugin.getRankManager().playerHasPermission(playerUuid, "towny.town.claim") ||
@@ -880,6 +899,7 @@ public class TownCommand implements CommandExecutor, TabCompleter {
         player.sendMessage("§e/town toggle <flag> §7- Toggle town flag");
         player.sendMessage("§e/town info [town] §7- Show town information");
         player.sendMessage("§e/town list [page] §7- List all towns");
+        player.sendMessage("§e/town chunklimit <new limit> §7- Set town chunk limit");
     }
 
     // Utility methods
@@ -936,7 +956,7 @@ public class TownCommand implements CommandExecutor, TabCompleter {
             List<String> subCommands = Arrays.asList(
                     "create", "delete", "join", "leave", "invite", "accept", "decline", "kick", "rank",
                     "spawn", "setspawn", "deposit", "withdraw",
-                    "set", "toggle", "info", "list"
+                    "set", "toggle", "info", "list", "chunklimit"
             );
 
             for (String sub : subCommands) {

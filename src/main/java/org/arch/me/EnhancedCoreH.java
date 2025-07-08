@@ -32,6 +32,8 @@ public final class EnhancedCoreH extends JavaPlugin {
     private BufferZoneManager bufferZoneManager;
     private TownInvitationManager townInvitationManager;
     private NationInvitationManager nationInvitationManager;
+    private SettingsManager settingsManager;
+    private SettingsManager settingsManager;
 
     @Override
     public void onEnable() {
@@ -61,6 +63,7 @@ public final class EnhancedCoreH extends JavaPlugin {
 
         // Initialize managers
         playerManager = new PlayerManager(this);
+        settingsManager = new SettingsManager(this);
         rankManager = new RankManager(this);
         townManager = new TownManager(this);
         chunkManager = new ChunkManager(this);
@@ -78,6 +81,7 @@ public final class EnhancedCoreH extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new ChunkProtectionListener(this), this);
         getServer().getPluginManager().registerEvents(new TownListener(this), this);
         getServer().getPluginManager().registerEvents(new PlayerJoinListener(this), this);
+        getServer().getPluginManager().registerEvents(new org.arch.me.gui.ChunkLimitGUI(this), this);
 
         getLogger().info("EnhancedCoreH has been enabled successfully!");
     }
@@ -239,6 +243,10 @@ public final class EnhancedCoreH extends JavaPlugin {
         return townInvitationManager;
     }
 
+
+    public SettingsManager getSettingsManager() {
+        return settingsManager;
+    }
     public NationInvitationManager getNationInvitationManager() {
         return nationInvitationManager;
     }

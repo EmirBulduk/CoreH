@@ -851,7 +851,7 @@ public class NationCommand implements CommandExecutor, TabCompleter {
                     }
                 }
                 case "deputy" -> {
-                    List<String> deputyActions = Arrays.asList("set", "remove");
+                    List<String> deputyActions = Arrays.asList("set", "remove", "list");
                     for (String action : deputyActions) {
                         if (action.toLowerCase().startsWith(args[1].toLowerCase())) {
                             completions.add(action);
@@ -1128,6 +1128,7 @@ public class NationCommand implements CommandExecutor, TabCompleter {
         if (args.length < 3) {
             player.sendMessage("§cUsage: /nation deputy set <player>");
             player.sendMessage("§cUsage: /nation deputy remove <player>");
+            player.sendMessage("§cUsage: /nation deputy list");
             return;
         }
 
@@ -1143,50 +1144,88 @@ public class NationCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
-        // Check permissions - king or players with nation.deputy permission
-        if (!nation.isKing(player.getUniqueId()) &&
-            !plugin.getRankManager().playerHasPermission(player.getUniqueId(), "towny.nation.deputy")) {
-            player.sendMessage("§cYou don't have permission to manage nation deputies!");
+        // Check permissions - only king can manage deputies
+        if (!nation.isKing(player.getUniqueId())) {
+            player.sendMessage("§cOnly the nation king can manage deputies!");
             return;
         }
 
         String action = args[1].toLowerCase();
-        String targetPlayerName = args[2];
 
+        // Handle list action separately since it doesn't need a target player
+        if ("list".equals(action)) {
+            handleDeputyList(player, nation);
+            return;
+        }
+
+        if (args.length < 3) {
+            player.sendMessage("§cUsage: /nation deputy " + action + " <player>");
+            return;
+        }
+
+        String targetPlayerName = args[2];
         Player targetPlayer = plugin.getServer().getPlayer(targetPlayerName);
         if (targetPlayer == null) {
             player.sendMessage("§cPlayer not found or not online!");
             return;
         }
 
+        // Check if target player is from any town within the nation
         TownyPlayer targetTownyPlayer = plugin.getPlayerManager().getPlayer(targetPlayer.getUniqueId());
-        if (targetTownyPlayer == null || !targetTownyPlayer.hasNation() ||
-            !targetTownyPlayer.getNationUuid().equals(nation.getUuid())) {
-            player.sendMessage("§cPlayer must be a citizen of this nation!");
+        if (targetTownyPlayer == null || !targetTownyPlayer.hasTown()) {
+            player.sendMessage("§cPlayer must be a member of a town!");
+            return;
+        }
+
+        Town targetTown = plugin.getTownManager().getTown(targetTownyPlayer.getTownUuid());
+        if (targetTown == null || !targetTown.hasNation() || !targetTown.getNationUuid().equals(nation.getUuid())) {
+            player.sendMessage("§cPlayer must be from a town within your nation!");
+            return;
+        }
+
+        // Prevent king from setting themselves as deputy
+        if (targetPlayer.getUniqueId().equals(player.getUniqueId())) {
+            player.sendMessage("§cYou cannot set yourself as deputy - you are already the king!");
             return;
         }
 
         switch (action) {
-            case "set" -> {
-                plugin.getRankManager().setPlayerRank(targetPlayer.getUniqueId(),
-                        plugin.getRankManager().getRank("deputy").getUuid())
+            case "set", "add", "promote" -> {
+                // Check if player is already a deputy
+                if (plugin.getRankManager().playerHasPermission(targetPlayer.getUniqueId(), "towny.nation.deputy")) {
+                    player.sendMessage("§c" + targetPlayer.getName() + " is already a deputy!");
+                    return;
+                }
+
+                var deputyRank = plugin.getRankManager().getRank("deputy");
+                if (deputyRank == null) {
+                    player.sendMessage("§cDeputy rank not found! Contact an administrator.");
+                    return;
+                }
+
+                plugin.getRankManager().setPlayerRank(targetPlayer.getUniqueId(), deputyRank.getUuid())
                     .thenAccept(success -> {
                         if (success) {
-                            player.sendMessage("§a" + targetPlayer.getName() + " has been promoted to deputy.");
-                            targetPlayer.sendMessage("§aYou have been promoted to deputy of the nation.");
+                            player.sendMessage("§a" + targetPlayer.getName() + " from " + targetTown.getName() + " has been promoted to deputy.");
+                            targetPlayer.sendMessage("§aYou have been promoted to deputy of the nation " + nation.getName() + "!");
+
+                            // Notify the target player's town
+                            if (targetTown.isMayor(targetPlayer.getUniqueId())) {
+                                player.sendMessage("§7Note: " + targetPlayer.getName() + " is the mayor of " + targetTown.getName());
+                            }
                         } else {
                             player.sendMessage("§cFailed to set deputy rank.");
                         }
                     });
             }
-            case "remove" -> {
+            case "remove", "demote" -> {
                 // Check if the player is currently a deputy
                 if (!plugin.getRankManager().playerHasPermission(targetPlayer.getUniqueId(), "towny.nation.deputy")) {
-                    player.sendMessage("§cThat player is not a deputy.");
+                    player.sendMessage("§c" + targetPlayer.getName() + " is not a deputy.");
                     return;
                 }
 
-                // Set player back to default citizen rank instead of removing rank entirely
+                // Set player back to default citizen rank
                 var citizenRank = plugin.getRankManager().getRank("citizen");
                 if (citizenRank == null) {
                     player.sendMessage("§cFailed to find citizen rank!");
@@ -1197,13 +1236,54 @@ public class NationCommand implements CommandExecutor, TabCompleter {
                     .thenAccept(success -> {
                         if (success) {
                             player.sendMessage("§a" + targetPlayer.getName() + " has been removed from deputy and set back to citizen.");
-                            targetPlayer.sendMessage("§aYou have been removed from deputy of the nation and are now a citizen.");
+                            targetPlayer.sendMessage("§aYou have been removed from deputy of the nation " + nation.getName() + " and are now a citizen.");
                         } else {
                             player.sendMessage("§cFailed to remove deputy rank.");
                         }
                     });
             }
-            default -> player.sendMessage("§cInvalid action. Use: set, remove");
+            default -> {
+                player.sendMessage("§cInvalid action. Use: set, remove, list");
+                player.sendMessage("§cUsage: /nation deputy set <player>");
+                player.sendMessage("§cUsage: /nation deputy remove <player>");
+                player.sendMessage("§cUsage: /nation deputy list");
+            }
+        }
+    }
+
+    private void handleDeputyList(Player player, Nation nation) {
+        // Find all deputies in the nation
+        List<String> deputies = new ArrayList<>();
+
+        // Check all towns in the nation for deputies
+        for (UUID townUuid : nation.getTowns()) {
+            Town town = plugin.getTownManager().getTown(townUuid);
+            if (town == null) continue;
+
+            for (UUID residentUuid : town.getResidents()) {
+                if (plugin.getRankManager().playerHasPermission(residentUuid, "towny.nation.deputy")) {
+                    Player deputyPlayer = plugin.getServer().getPlayer(residentUuid);
+                    String playerName;
+                    if (deputyPlayer != null) {
+                        playerName = deputyPlayer.getName();
+                    } else {
+                        TownyPlayer townyPlayer = plugin.getPlayerManager().getPlayer(residentUuid);
+                        playerName = townyPlayer != null ? townyPlayer.getName() : "Unknown";
+                    }
+                    deputies.add("§e" + playerName + "§7 (§f" + town.getName() + "§7)");
+                }
+            }
+        }
+
+        if (deputies.isEmpty()) {
+            player.sendMessage("§eNation " + nation.getName() + " has no deputies.");
+            player.sendMessage("§7Use §e/nation deputy set <player>§7 to promote someone to deputy.");
+        } else {
+            player.sendMessage("§6=== Nation Deputies (" + deputies.size() + ") ===");
+            for (String deputy : deputies) {
+                player.sendMessage("§7- " + deputy);
+            }
+            player.sendMessage("§7Deputies can invite towns, kick towns, and manage nation settings.");
         }
     }
 
