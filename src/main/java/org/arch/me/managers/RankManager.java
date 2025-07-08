@@ -27,16 +27,92 @@ public class RankManager {
 
     private void initializeDefaultRanks() {
         try {
-            // Create default town ranks
-            createDefaultRank("resident", "TOWN", 0, Arrays.asList("towny.town.resident"));
-            createDefaultRank("manager", "TOWN", 50, Arrays.asList("towny.town.resident", "towny.town.claim", "towny.town.unclaim", "towny.town.invite", "towny.town.kick", "towny.town.set.flags"));
-            createDefaultRank("assistant", "TOWN", 75, Arrays.asList("towny.town.resident", "towny.town.claim", "towny.town.unclaim", "towny.town.invite", "towny.town.kick", "towny.town.set.*", "towny.town.toggle.*"));
-            
-            // Create default nation ranks
-            createDefaultRank("citizen", "NATION", 0, Arrays.asList("towny.nation.citizen"));
-            createDefaultRank("advisor", "NATION", 50, Arrays.asList("towny.nation.citizen", "towny.nation.invite", "towny.nation.kick", "towny.nation.ally", "towny.nation.enemy"));
-            createDefaultRank("minister", "NATION", 75, Arrays.asList("towny.nation.citizen", "towny.nation.invite", "towny.nation.kick", "towny.nation.ally", "towny.nation.enemy", "towny.nation.set.*", "towny.nation.toggle.*"));
-            
+            // Create default town ranks with comprehensive permissions
+            createDefaultRank("resident", "TOWN", 0, Arrays.asList(
+                "towny.town.resident",
+                "towny.town.home",
+                "towny.town.deposit",
+                "towny.town.plot.claim",
+                "towny.town.plot.unclaim"
+            ));
+
+            createDefaultRank("manager", "TOWN", 50, Arrays.asList(
+                "towny.town.resident",
+                "towny.town.home",
+                "towny.town.deposit",
+                "towny.town.plot.claim",
+                "towny.town.plot.unclaim",
+                "towny.town.claim",
+                "towny.town.unclaim",
+                "towny.town.invite",
+                "towny.town.kick",
+                "towny.town.set.flags",
+                "towny.town.set.spawn",
+                "towny.town.set.board",
+                "towny.town.set.taxes",
+                "towny.town.manager",
+                "towny.town.plot.manage",
+                "towny.town.withdraw"
+            ));
+
+            createDefaultRank("assistant", "TOWN", 75, Arrays.asList(
+                "towny.town.resident",
+                "towny.town.home",
+                "towny.town.deposit",
+                "towny.town.plot.claim",
+                "towny.town.plot.unclaim",
+                "towny.town.claim",
+                "towny.town.unclaim",
+                "towny.town.invite",
+                "towny.town.kick",
+                "towny.town.set.flags",
+                "towny.town.set.spawn",
+                "towny.town.set.board",
+                "towny.town.set.taxes",
+                "towny.town.set.*",
+                "towny.town.toggle.*",
+                "towny.town.assistant",
+                "towny.town.manager",
+                "towny.town.plot.manage",
+                "towny.town.withdraw",
+                "towny.town.set.perm"
+            ));
+
+            // Create default nation ranks with comprehensive permissions
+            createDefaultRank("citizen", "NATION", 0, Arrays.asList(
+                "towny.nation.citizen",
+                "towny.nation.home",
+                "towny.nation.deposit"
+            ));
+
+            createDefaultRank("advisor", "NATION", 50, Arrays.asList(
+                "towny.nation.citizen",
+                "towny.nation.home",
+                "towny.nation.deposit",
+                "towny.nation.invite",
+                "towny.nation.kick",
+                "towny.nation.ally",
+                "towny.nation.enemy",
+                "towny.nation.advisor",
+                "towny.nation.withdraw"
+            ));
+
+            createDefaultRank("deputy", "NATION", 85, Arrays.asList(
+                "towny.nation.citizen",
+                "towny.nation.home",
+                "towny.nation.deposit",
+                "towny.nation.invite",
+                "towny.nation.kick",
+                "towny.nation.ally",
+                "towny.nation.enemy",
+                "towny.nation.set.*",
+                "towny.nation.toggle.*",
+                "towny.nation.deputy",
+                "towny.nation.advisor",
+                "towny.nation.withdraw",
+                "towny.nation.manage.towns"
+            ));
+
         } catch (Exception e) {
             plugin.getLogger().severe("Failed to initialize default ranks: " + e.getMessage());
         }

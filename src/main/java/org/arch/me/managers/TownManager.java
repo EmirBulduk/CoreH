@@ -4,6 +4,7 @@ import org.arch.me.EnhancedCoreH;
 import org.arch.me.database.DatabaseManager;
 import org.arch.me.models.Town;
 import org.arch.me.models.TownyPlayer;
+import org.arch.me.models.Rank;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 
@@ -325,6 +326,14 @@ public class TownManager {
                     player.setNationUuid(town.getNationUuid());
                 }
 
+                // Assign default town rank (resident) if player doesn't have one
+                if (plugin.getRankManager().getPlayerRank(playerUuid) == null) {
+                    Rank defaultRank = plugin.getRankManager().getDefaultRank("TOWN");
+                    if (defaultRank != null) {
+                        plugin.getRankManager().setPlayerRank(playerUuid, defaultRank.getUuid());
+                    }
+                }
+
                 // Save changes
                 saveTown(town);
                 plugin.getPlayerManager().savePlayer(player);
@@ -566,5 +575,127 @@ public class TownManager {
     public int getTownCount() {
         return townCache.size();
     }
-}
 
+    // Rank management methods
+    public boolean setPlayerRank(UUID townUuid, UUID playerUuid, String rankName) {
+        Town town = getTown(townUuid);
+        if (town == null || !town.hasResident(playerUuid)) {
+            return false;
+        }
+
+        Rank rank = plugin.getRankManager().getRank(rankName);
+        if (rank == null || !rank.isTownRank()) {
+            return false;
+        }
+
+        return plugin.getRankManager().setPlayerRank(playerUuid, rank.getUuid()).join();
+    }
+
+    public boolean promotePlayer(UUID townUuid, UUID playerUuid, UUID promoterUuid) {
+        Town town = getTown(townUuid);
+        if (town == null || !town.hasResident(playerUuid)) {
+            return false;
+        }
+
+        // Check if promoter has permission
+        if (!town.isMayor(promoterUuid) && !town.isAssistant(promoterUuid)) {
+            return false;
+        }
+
+        Rank currentRank = plugin.getRankManager().getPlayerRank(playerUuid);
+        if (currentRank == null) {
+            // Give default rank first
+            Rank defaultRank = plugin.getRankManager().getDefaultRank("TOWN");
+            if (defaultRank != null) {
+                plugin.getRankManager().setPlayerRank(playerUuid, defaultRank.getUuid());
+            }
+            return true;
+        }
+
+        // Find next higher rank
+        List<Rank> townRanks = plugin.getRankManager().getRanksByType("TOWN");
+        Rank nextRank = null;
+
+        for (Rank rank : townRanks) {
+            if (rank.getPriority() > currentRank.getPriority()) {
+                if (nextRank == null || rank.getPriority() < nextRank.getPriority()) {
+                    nextRank = rank;
+                }
+            }
+        }
+
+        if (nextRank != null) {
+            return plugin.getRankManager().setPlayerRank(playerUuid, nextRank.getUuid()).join();
+        }
+
+        return false;
+    }
+
+    public boolean demotePlayer(UUID townUuid, UUID playerUuid, UUID demoterUuid) {
+        Town town = getTown(townUuid);
+        if (town == null || !town.hasResident(playerUuid)) {
+            return false;
+        }
+
+        // Check if demoter has permission
+        if (!town.isMayor(demoterUuid) && !town.isAssistant(demoterUuid)) {
+            return false;
+        }
+
+        // Can't demote mayor
+        if (town.isMayor(playerUuid)) {
+            return false;
+        }
+
+        Rank currentRank = plugin.getRankManager().getPlayerRank(playerUuid);
+        if (currentRank == null) {
+            return false;
+        }
+
+        // Find next lower rank
+        List<Rank> townRanks = plugin.getRankManager().getRanksByType("TOWN");
+        Rank nextRank = null;
+
+        for (Rank rank : townRanks) {
+            if (rank.getPriority() < currentRank.getPriority()) {
+                if (nextRank == null || rank.getPriority() > nextRank.getPriority()) {
+                    nextRank = rank;
+                }
+            }
+        }
+
+        if (nextRank != null) {
+            return plugin.getRankManager().setPlayerRank(playerUuid, nextRank.getUuid()).join();
+        }
+
+        return false;
+    }
+
+    public String getPlayerRankName(UUID playerUuid) {
+        Rank rank = plugin.getRankManager().getPlayerRank(playerUuid);
+        return rank != null ? rank.getName() : "resident";
+    }
+
+    public boolean canPlayerManageTown(UUID townUuid, UUID playerUuid) {
+        Town town = getTown(townUuid);
+        if (town == null) return false;
+
+        // Mayor always can manage
+        if (town.isMayor(playerUuid)) return true;
+
+        // Check if player is nation deputy
+        if (town.hasNation()) {
+            try {
+                var nation = plugin.getNationManager().getNation(town.getNationUuid());
+                if (nation != null && nation.isDeputy(playerUuid)) {
+                    return true;
+                }
+            } catch (Exception e) {
+                // Handle if nation manager not available
+            }
+        }
+
+        // Check town rank permissions
+        return town.isManager(playerUuid) || town.isAssistant(playerUuid);
+    }
+}

@@ -1,6 +1,7 @@
 package org.arch.me.models;
 
 import org.bukkit.Location;
+import org.arch.me.EnhancedCoreH;
 
 import java.math.BigDecimal;
 import java.sql.Timestamp;
@@ -261,5 +262,132 @@ public class Town {
 
     public int getRemainingChunkSlots() {
         return Math.max(0, maxChunks - claimedChunks.size());
+    }
+
+    // Rank-based permission methods
+    public boolean hasPermission(UUID playerUuid, String permission) {
+        if (playerUuid == null || permission == null) return false;
+
+        // Mayor has all permissions
+        if (isMayor(playerUuid)) return true;
+
+        // Check if player is nation deputy and has nation-wide permissions
+        if (hasNation() && isNationDeputy(playerUuid)) {
+            return hasNationDeputyPermission(permission);
+        }
+
+        // Check player's town rank permissions
+        return hasRankPermission(playerUuid, permission);
+    }
+
+    private boolean isNationDeputy(UUID playerUuid) {
+        if (!hasNation()) return false;
+
+        try {
+            EnhancedCoreH plugin = EnhancedCoreH.getInstance();
+            if (plugin != null && plugin.getNationManager() != null) {
+                var nation = plugin.getNationManager().getNation(nationUuid);
+                return nation != null && nation.isDeputy(playerUuid);
+            }
+        } catch (Exception e) {
+            // Handle plugin not available
+        }
+        return false;
+    }
+
+    private boolean hasNationDeputyPermission(String permission) {
+        // Nation deputies have manager-level permissions in all towns of their nation
+        return isManagerPermission(permission) || isAssistantPermission(permission) || isResidentPermission(permission);
+    }
+
+    private boolean hasRankPermission(UUID playerUuid, String permission) {
+        try {
+            EnhancedCoreH plugin = EnhancedCoreH.getInstance();
+            if (plugin != null && plugin.getRankManager() != null) {
+                return plugin.getRankManager().playerHasPermission(playerUuid, permission);
+            }
+        } catch (Exception e) {
+            // Handle plugin not available
+        }
+        return false;
+    }
+
+    private boolean isManagerPermission(String permission) {
+        return permission.contains("claim") || permission.contains("unclaim") ||
+                permission.contains("invite") || permission.contains("kick") ||
+                permission.contains("set.flags") || permission.contains("set.spawn") ||
+                permission.contains("set.board") || permission.contains("set.taxes");
+    }
+
+    private boolean isAssistantPermission(String permission) {
+        return isManagerPermission(permission) ||
+                permission.contains("toggle") || permission.contains("set.perm");
+    }
+
+    private boolean isResidentPermission(String permission) {
+        return permission.contains("resident") || permission.contains("plot.claim") ||
+                permission.contains("plot.unclaim") || permission.contains("home");
+    }
+
+    // Specific permission checks for common actions
+    public boolean canClaimChunk(UUID playerUuid) {
+        return hasPermission(playerUuid, "towny.town.claim") && canClaimMoreChunks();
+    }
+
+    public boolean canUnclaimChunk(UUID playerUuid) {
+        return hasPermission(playerUuid, "towny.town.unclaim");
+    }
+
+    public boolean canInvitePlayer(UUID playerUuid) {
+        return hasPermission(playerUuid, "towny.town.invite") && canAddResident();
+    }
+
+    public boolean canKickPlayer(UUID playerUuid) {
+        return hasPermission(playerUuid, "towny.town.kick");
+    }
+
+    public boolean canSetFlags(UUID playerUuid) {
+        return hasPermission(playerUuid, "towny.town.set.flags");
+    }
+
+    public boolean canSetSpawn(UUID playerUuid) {
+        return hasPermission(playerUuid, "towny.town.set.spawn");
+    }
+
+    public boolean canSetBoard(UUID playerUuid) {
+        return hasPermission(playerUuid, "towny.town.set.board");
+    }
+
+    public boolean canSetTaxes(UUID playerUuid) {
+        return hasPermission(playerUuid, "towny.town.set.taxes");
+    }
+
+    public boolean canToggleFlags(UUID playerUuid) {
+        return hasPermission(playerUuid, "towny.town.toggle");
+    }
+
+    public boolean canManagePlots(UUID playerUuid) {
+        return hasPermission(playerUuid, "towny.town.plot.manage");
+    }
+
+    public boolean canWithdrawFromBank(UUID playerUuid) {
+        return hasPermission(playerUuid, "towny.town.withdraw");
+    }
+
+    public boolean canDepositToBank(UUID playerUuid) {
+        return hasPermission(playerUuid, "towny.town.deposit") || hasResident(playerUuid);
+    }
+
+    // Role-based checks
+    public boolean isManager(UUID playerUuid) {
+        return hasPermission(playerUuid, "towny.town.manager") || isMayor(playerUuid);
+    }
+
+    public boolean isAssistant(UUID playerUuid) {
+        return hasPermission(playerUuid, "towny.town.assistant") || isManager(playerUuid);
+    }
+
+    public boolean isOfficer(UUID playerUuid) {
+        return isAssistant(playerUuid) || isManager(playerUuid) || isMayor(playerUuid);
     }
 }

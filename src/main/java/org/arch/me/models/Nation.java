@@ -22,6 +22,7 @@ public class Nation {
     private Map<String, Boolean> flags;
     private Map<String, Object> metadata;
     private Set<UUID> towns;
+    private Set<UUID> deputies; // Nation deputies for town management
 
     public Nation(UUID uuid, String name, UUID kingUuid, UUID capitalTownUuid, UUID capitalChunkUuid) {
         this.uuid = uuid;
@@ -39,6 +40,7 @@ public class Nation {
         this.flags = new HashMap<>();
         this.metadata = new HashMap<>();
         this.towns = new HashSet<>();
+        this.deputies = new HashSet<>(); // Initialize deputies set
 
         // Add capital town
         if (capitalTownUuid != null) {
@@ -111,6 +113,9 @@ public class Nation {
         }
     }
 
+    public Set<UUID> getDeputies() { return deputies; }
+    public void setDeputies(Set<UUID> deputies) { this.deputies = deputies; }
+
     // Utility methods
     public boolean isKing(UUID playerUuid) {
         return kingUuid.equals(playerUuid);
@@ -182,6 +187,40 @@ public class Nation {
 
     public List<UUID> getTownsList() {
         return new ArrayList<>(towns);
+    }
+
+    // Deputy management methods
+    public boolean isDeputy(UUID playerUuid) {
+        return deputies.contains(playerUuid);
+    }
+
+    public void addDeputy(UUID playerUuid) {
+        deputies.add(playerUuid);
+    }
+
+    public void removeDeputy(UUID playerUuid) {
+        deputies.remove(playerUuid);
+    }
+
+    public boolean hasDeputy(UUID playerUuid) {
+        return deputies.contains(playerUuid);
+    }
+
+    public Set<UUID> getDeputyList() {
+        return new HashSet<>(deputies);
+    }
+
+    public int getDeputyCount() {
+        return deputies.size();
+    }
+
+    public boolean canManageNation(UUID playerUuid) {
+        return isKing(playerUuid) || isDeputy(playerUuid);
+    }
+
+    public boolean canManageTowns(UUID playerUuid) {
+        // King and deputies can manage all towns in the nation
+        return isKing(playerUuid) || isDeputy(playerUuid);
     }
 
     @Override
